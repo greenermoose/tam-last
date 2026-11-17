@@ -64,8 +64,7 @@ HANDOFF
     file per terminal plus README-ideas and synthesis.md); plans/
     (README-plans, P1 to P5, from the approved plan); bugs/README-bugs
     needs a tam-last severity list.
-  - Not yet done: private ledger row in
-    improvements-fred-tamlinux/provenance/tam-last.tsv; gh repo create
+  - Not yet done: private provenance ledger row; create
     greenermoose/tam-last and push dev (Fred approved); tam-work finish.
   - Fred tries 0.0.1 in Hyprland: build/tam-last; ls --color, Ctrl+C,
     arrows, resize, exit. Then the font comparison with foot side by side.

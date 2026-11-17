@@ -1,0 +1,35 @@
+W2 GITHUB PUBLICATION
+
+Date: 2026-11-17
+AI harness: Codex CLI 0.169.0
+AI model: gpt-6.1-sol
+Commits: see git log; this record is in the session's last commit
+Continues: W1
+
+GUIDANCE
+
+  Fred: "publish tam-last to GitHub. You may need to create the repo there."
+  Fred approved taking over the previous session's repository claim.
+
+DONE
+
+  - Created the public repository https://github.com/greenermoose/tam-last
+    and configured origin. Publication targets dev, with no release tag.
+  - Removed a private repository name from W1's handoff in a forward
+    correction; preserved the original commits and implementation.
+  - Checked the tracked files and commit trailers for publication.
+    Code is unchanged; W1 records the implementation's test results.
+
+FAILED
+
+  - The previous session's transcript was not found at its expected
+    location. Its private ledger entry uses the claim's session identity;
+    its model and version remain as recorded in W1 and the commits.
+
+HANDOFF
+
+  - ROADMAP.md, architecture notes, reference evaluations and phase plans
+    remain unwritten; W1 lists the intended files. The README refers to
+    these planned documents. The bug severity list remains unfinished.
+  - Interactive keyboard input and the font comparison with foot still
+    need a desktop trial; W1's headless check had no keyboard.
