@@ -1,0 +1,28 @@
+/* Drawing the grid into pixels. */
+#ifndef TL_RENDER_H
+#define TL_RENDER_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "tam-last/font.h"
+#include "tam-last/term.h"
+
+struct tl_palette {
+	uint32_t fg, bg, cursor, cursor_text;
+	uint32_t index[256];
+};
+
+/* The compiled-in colors: Tamlinux's current dark theme (Tokyo Night) for
+ * the first 16, then the standard 6x6x6 cube and gray ramp. */
+void tl_palette_default(struct tl_palette *p);
+uint32_t tl_color_resolve(const struct tl_palette *p, uint32_t color,
+	bool fg);
+
+/* Draw t into a width x height XRGB8888 image with pad pixels of margin.
+ * focused draws a filled cursor block, otherwise an outline. */
+void tl_render(const struct tl_term *t, struct tl_font *f,
+	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
+	int pad, bool focused);
+
+#endif

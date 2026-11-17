@@ -1,0 +1,15 @@
+# Reference clones of other terminals and of the libraries they lean on,
+# read by tools/pull-references.
+# One project per line:  name  url  local-path  branch  depth
+# depth: "full" for a normal clone, or a number for a shallow clone.
+# Lines starting with # are comments. Add a project by adding a line.
+foot          https://codeberg.org/dnkl/foot.git                       ~/Code/foot          master  full
+havoc         https://github.com/ii8/havoc.git                         ~/Code/havoc         master  1
+st            https://git.suckless.org/st                              ~/Code/st            master  1
+kitty         https://github.com/kovidgoyal/kitty.git                  ~/Code/kitty         master  1
+alacritty     https://github.com/alacritty/alacritty.git               ~/Code/alacritty     master  1
+ghostty       https://github.com/ghostty-org/ghostty.git               ~/Code/ghostty       main    1
+wezterm       https://github.com/wezterm/wezterm.git                   ~/Code/wezterm       main    1
+libxkbcommon  https://github.com/xkbcommon/libxkbcommon.git            ~/Code/libxkbcommon  master  1
+stb           https://github.com/nothings/stb.git                      ~/Code/stb           master  1
+wayland       https://gitlab.freedesktop.org/wayland/wayland.git       ~/Code/wayland       main    1

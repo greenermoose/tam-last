@@ -1,0 +1,71 @@
+W1 TAM-LAST SCAFFOLD AND THE 0.0.1 SKELETON
+
+Date: 2026-11-17
+AI harness: Claude Code 2.1.326
+AI model: claude-opus-5-5
+Commits: see git log; this record is in the session's last commit
+
+
+GUIDANCE
+
+  Fred, the opening request:
+
+    "Create a new git repo in ~/Code/tamlinux/tam-last for our own Wayland
+    terminal emulator, written in C with no dependency other than the
+    standard C libraries and libtam. Use tam-pane and tam-clam as a model
+    for the repo directory structure. We are using foot (see ~/Code/foot)
+    as the primary source for ideas, but look at other Wayland terminal
+    emulators, too, for insights. LICENSE GPL v3. README should say that
+    we want to have full control over how key presses get from evdev to
+    our TUI apps. Also, just having fun diving into the info flow between
+    human interfaces and our apps."
+
+  Fred's answers to the planning questions:
+
+    Scope: "Scaffold + 0.0.1"
+    Keymap: "Own compiled keymap" (compositor's XKB text ignored)
+    Fonts: "TrueType from the start", then on FreeType: "Own, FreeType
+      as fallback" (FreeType only if Fred's side-by-side with foot finds
+      our text worse)
+    GitHub: "Create and push dev"
+
+
+DONE
+
+  - Repository: LICENSE (GPL v3), README, COPYRIGHT, UPSTREAM.md,
+    AI_PROVENANCE.md, VERSION 0.0.1, plain Makefile, tools/pull-references
+    with ideas/sources (foot, havoc, st, kitty, alacritty, ghostty,
+    wezterm, libxkbcommon, stb, wayland; all cloned under ~/Code).
+  - 0.0.1 in C11: own Wayland wire client (src/wl), xdg toplevel and
+    keyboard (window.c), shm buffers, TrueType glyf parser and exact-area
+    rasterizer with vertical-only x-height fitting (font/), Williams VT
+    parser and screen (vt.c, term.c), renderer with the Tokyo Night theme
+    palette, own evdev table, US keymap and legacy xterm encoding (keys/),
+    pty, poll loop with no idle timeout.
+  - Checked: no warnings; make test and make sanitize pass (5 unit suites,
+    about 3,450 checks, plus the headless run under tam-pane: window
+    maps, command exit status passes through). readelf -d: libc and libm
+    only. JetBrains Mono 9 pt gives 7x17 cells, as foot. 200,000 lines of
+    seq in 0.31 s headless. build/tests/render.ppm looked right by eye.
+
+
+FAILED
+
+  - First sanitize run found a NULL memmove in tl_pty_flush; fixed.
+  - Key input was not tested through a compositor: the headless check
+    has no keyboard. Only the unit tests and Fred's own try cover it.
+
+
+HANDOFF
+
+  - Not yet written (the session hit its usage limit): ROADMAP.md;
+    arch/ (README-arch, principles.md, dependencies.md,
+    data-structures.md, key-path.md, foot-evaluation.md); ideas/ (one
+    file per terminal plus README-ideas and synthesis.md); plans/
+    (README-plans, P1 to P5, from the approved plan); bugs/README-bugs
+    needs a tam-last severity list.
+  - Not yet done: private ledger row in
+    improvements-fred-tamlinux/provenance/tam-last.tsv; gh repo create
+    greenermoose/tam-last and push dev (Fred approved); tam-work finish.
+  - Fred tries 0.0.1 in Hyprland: build/tam-last; ls --color, Ctrl+C,
+    arrows, resize, exit. Then the font comparison with foot side by side.

@@ -1,0 +1,126 @@
+TAM-LAST - THE TAMLINUX TERMINAL
+
+tam-last is our own Wayland terminal emulator, written in C. It is built
+fresh, from the ground up, and it learns from the best ideas and the best
+code of foot, kitty, st, havoc, ghostty, alacritty, wezterm and every
+other terminal we can find. Where another terminal's code works well, we
+take it and refactor it into tam-last's own shape. Where it doesn't, we
+leave it out. tam-last is not a fork or a clone of any of them.
+
+
+WHY
+
+  We want full control over how key presses get from evdev to our TUI
+  apps. Between a finger on a key and a program reading a byte there are
+  a keyboard's firmware, the kernel's input layer, the compositor, a
+  keymap, the terminal's key encoding, the kernel's tty layer, and the
+  program's own decoder. Today most of those belong to someone else. With
+  tam-pane (our compositor), tam-last (our terminal), libtam's key decoder
+  and tam-clam (our shell), every hop on the path is code we can read,
+  change and test.
+
+  And we are having fun. The flow of information between human interfaces
+  and our apps is a good story, and tam-last is a way to dive into it:
+  every hop is documented in arch/key-path.md, and tam-last will show its
+  own part of the path as you type (P2).
+
+
+WHAT IT DOES
+
+  0.0.1 opens a window, runs your shell, draws text with a TrueType font,
+  and takes keyboard input:
+
+  - Its own Wayland client code: the socket, message framing and
+    file-descriptor passing are written here. There is no libwayland.
+  - Its own TrueType rasterizer: it reads the font file's glyf outlines
+    and draws them antialiased, with the x-height snapped to the pixel
+    grid. There is no FreeType and no fontconfig. JetBrains Mono at 9
+    points makes 7 x 17 pixel cells, as in foot.
+  - Its own keymap: the compositor's evdev key codes are turned into
+    characters by tables compiled into tam-last (a US layout for now).
+    There is no xkbcommon.
+  - The legacy xterm key encoding, which every terminal program reads.
+  - The escape sequences a shell and `ls --color` need: cursor movement,
+    erasing, inserting and deleting characters and lines, 16, 256 and
+    direct colors, bold, underline, inverse, and answers to cursor and
+    device queries. Wide characters take two cells.
+
+  Full-screen programs (vim, htop, yazi), scrollback, the clipboard and
+  the kitty keyboard protocol come next; see ROADMAP.md.
+
+
+HOW IT IS BUILT
+
+  - Every dependency has to earn its place. The goal is the C library
+    (libc and libm) and libtam, and nothing else, and 0.0.1 is there:
+    `readelf -d build/tam-last` lists only libc.so.6 and libm.so.6.
+  - Small modules with one job each, and explicit state; the only global
+    is the pipe the SIGCHLD handler writes to.
+  - Everything from outside is untrusted: compositor messages, font files
+    and program output are bounds-checked, with limits on sizes and
+    counts, and fuzzed in the tests.
+  - Energy is a feature. An idle terminal sleeps in poll() with no
+    timeout; it draws only when something changed, at most once per
+    frame the compositor asks for. No cursor blink.
+  - Pure logic (the wire format, the parser and screen, the font code, the
+    key encoding) runs without a display and is unit tested.
+  - Plain Make. There is no other build system.
+
+  arch/principles.md has the full set of principles.
+
+
+BUILDING
+
+  Needs: a C11 compiler, make, and libtam installed under LIBTAM_PREFIX
+  (default $HOME/.local). Nothing else.
+
+    make              build build/tam-last
+    make test         unit tests, then the headless check
+    make sanitize     the tests again, built with ASan and UBSan
+    make install      install to PREFIX (default $HOME/.local)
+    make uninstall    remove the installed binary
+    make clean        remove build/
+
+  The headless check runs tam-pane (from ../tam-pane/build, or TAM_PANE)
+  on wlroots' headless backend, so it never touches the running desktop.
+  It is skipped when there is no tam-pane build.
+
+
+USING IT
+
+    tam-last                      run $SHELL
+    tam-last -e htop              run a command instead
+    tam-last -f FONT.ttf -s 11    another TrueType font, another size
+
+  The font is the --font file, else $TAM_LAST_FONT, else the first
+  installed of JetBrains Mono (Nerd Font), DejaVu Sans Mono, Liberation
+  Mono and Noto Sans Mono. Fonts with CFF outlines (.otf) are not read
+  yet.
+
+
+WHERE THINGS ARE
+
+  src/, include/   the terminal (one module per file)
+    wl/            Wayland wire protocol and requests
+    font/          TrueType parsing, rasterizing, glyph cache
+    keys/          keyboard state, layout and key encoding
+  tests/           unit tests and the headless check
+  protocols/       the Wayland protocol files our requests follow
+  ideas/           ideas we collect from other terminals
+  arch/            architecture: principles, the key path, data
+                   structures, dependencies, evaluations
+  plans/           one plan per work phase (P1, P2, ...)
+  bugs/            one record per bug (B1, B2, ...)
+  work/            one record per work session (W1, W2, ...)
+  tools/           helper scripts for developing tam-last
+  ROADMAP.md       milestones with their version numbers
+  UPSTREAM.md      every piece of code we took from another project
+  COPYRIGHT        copyright and license notices
+  LICENSE          GNU General Public License, version 3
+
+
+LICENSE
+
+  tam-last is free software under the GNU General Public License, version
+  3 or later. Code taken from other projects keeps its notices; see
+  COPYRIGHT and UPSTREAM.md.

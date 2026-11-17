@@ -1,0 +1,35 @@
+tam-last copyright and license notices
+
+The portions of tam-last written by a human are Copyright (C) 2026 Fred Horch.
+
+tam-last is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version. See LICENSE for the full text.
+
+tam-last is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.
+
+
+CODE AND DATA TAKEN FROM OTHER PROJECTS
+
+UPSTREAM.md lists each piece, its source file and commit, and how it was
+changed. The notices for those projects follow.
+
+  None yet. tam-last 0.0.1 is written fresh; the other terminals have only
+  been read. Two files are carried unchanged as references, with their
+  own notices inside them:
+
+    protocols/wayland.xml      Copyright 2008-2011 Kristian Hoegsberg,
+                               2010-2011 Intel Corporation, 2012-2013
+                               Collabora, Ltd. (MIT-style licence, in the
+                               file)
+    protocols/xdg-shell.xml    Copyright 2008-2013 Kristian Hoegsberg,
+                               2013 Rafael Antognolli, 2013 Jasper St.
+                               Pierre, 2010-2013 Intel Corporation,
+                               2015-2017 Samsung Electronics Co., Ltd,
+                               2015-2017 Red Hat Inc. (MIT-style licence,
+                               in the file)
+
+  When code is taken, its project's notice goes here in the same change.
