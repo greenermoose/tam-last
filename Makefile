@@ -48,12 +48,18 @@ $(B)/%.o: src/%.c
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# main.c prints the version, so it is rebuilt when VERSION changes.
+$(B)/main.o: VERSION
+
 $(B)/tests/test_%: tests/test_%.c $(CORE_OBJS) $(LIBTAM) tests/check.h
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -Itests $(LDFLAGS) -o $@ $< $(CORE_OBJS) $(LDLIBS)
 
 test: $(TESTS) $(B)/tam-last
 	@for t in $(TESTS); do $$t $(B)/tests || exit 1; done
+	@test "$$($(B)/tam-last --version)" = "tam-last $(VERSION)" || \
+		{ echo "version: FAILED (binary does not say $(VERSION))"; exit 1; }
+	@echo "version: tam-last $(VERSION): ok"
 	@sh tests/headless.sh $(B)/tam-last $(TAM_PANE)
 
 sanitize:

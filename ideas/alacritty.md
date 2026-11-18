@@ -9,7 +9,7 @@ through for structure only (starter note).
 ## Ideas worth taking
 
 - **The grid as a ring buffer of rows with a zero offset**
-  (`alacritty_terminal/src/grid/storage.rs`) — adopt (P1, 0.0.3), the
+  (`alacritty_terminal/src/grid/storage.rs`) — adopt (P1, 0.0.4), the
   same idea as foot's.
 - **The parser as a separate, reusable unit** — adopt; `vt.c` already
   knows nothing about the screen.

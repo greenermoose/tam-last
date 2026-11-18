@@ -10,7 +10,7 @@ source before acting).
 ## Ideas worth taking
 
 - **Scrollback in fixed-size memory pages** (`src/terminal/PageList.zig`,
-  `page.zig`) — consider (P1, 0.0.3). Pages are allocated and freed as a
+  `page.zig`) — consider (P1, 0.0.4). Pages are allocated and freed as a
   unit, which keeps memory bounded and cheap to trim.
 - **The terminal core as a separate library** — consider. tam-last's
   `vt.c` and `term.c` could become a libtam module that tam-pane or tam

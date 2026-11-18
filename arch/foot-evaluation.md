@@ -36,10 +36,10 @@ the MIT licence. It is tam-last's primary reference. Read from source on
 - **Frame callbacks gate drawing** (adopt, P1 0.0.1). foot renders on
   the frame callback and coalesces everything in between. tam-last does
   the same.
-- **The grid as a ring of rows** (adopt, P1 0.0.3). One structure for
+- **The grid as a ring of rows** (adopt, P1 0.0.4). One structure for
   scrollback and screen; scrolling moves an offset.
-- **Scroll damage as pixel moves** (adopt, P1 0.0.2).
-- **Box drawing by code** (adopt, P1 0.0.4). Fonts rarely make box
+- **Scroll damage as pixel moves** (adopt, P1 0.0.3).
+- **Box drawing by code** (adopt, P1 0.0.5). Fonts rarely make box
   characters join at every size.
 - **The kitty keyboard protocol** (adopt, P2 0.1.0); foot's
   implementation is a C reference.

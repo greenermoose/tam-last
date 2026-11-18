@@ -27,7 +27,7 @@ WHY
 
 WHAT IT DOES
 
-  0.0.1 opens a window, runs your shell, draws text with a TrueType font,
+  0.0.2 opens a window, runs your shell, draws text with a TrueType font,
   and takes keyboard input:
 
   - Its own Wayland client code: the socket, message framing and
@@ -54,7 +54,7 @@ WHAT IT DOES
 HOW IT IS BUILT
 
   - Every dependency has to earn its place. The goal is the C library
-    (libc and libm) and libtam, and nothing else, and 0.0.1 is there:
+    (libc and libm) and libtam, and nothing else, and 0.0.2 is there:
     `readelf -d build/tam-last` lists only libc.so.6 and libm.so.6.
   - Small modules with one job each, and explicit state; the only global
     is the pipe the SIGCHLD handler writes to.

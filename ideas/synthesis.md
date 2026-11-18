@@ -20,17 +20,17 @@ Start here. Each line points to the file with the details.
 - No FreeType: a glyf rasterizer of our own (havoc proves it works with
   stb_truetype, `havoc.md`), with vertical grid fitting. (P1, 0.0.1)
 - A fallback TrueType font compiled in, so tam-last always starts
-  (`havoc.md`). (consider, P1 0.0.4)
-- Box-drawing characters drawn by code (`foot.md`). (P1, 0.0.4)
+  (`havoc.md`). (consider, P1 0.0.5)
+- Box-drawing characters drawn by code (`foot.md`). (P1, 0.0.5)
 
 ## The screen and memory
 
 - Draw only on the frame callback, only when something changed
   (`foot.md`). (P1, 0.0.1)
 - Scrollback as a ring of rows (`foot.md`, `alacritty.md`) or as pages
-  (`ghostty.md`). (P1, 0.0.3)
+  (`ghostty.md`). (P1, 0.0.4)
 - Scroll damage as pixel moves; possibly foot's zero-copy buffer
-  scrolling (`foot.md`). (P1, 0.0.2)
+  scrolling (`foot.md`). (P1, 0.0.3)
 
 ## Structure
 

@@ -41,6 +41,10 @@ DONE
     (brought forward from 0.0.4): the buffer is drawn at device pixels,
     the font is opened at 96 dpi times the scale. 9 pt at 1.25 gives
     9 x 20 cells, as foot. test_render now also writes a 120 dpi sample.
+  - Fred: "tam-last is reporting version 0.0.1. Is that correct? Bump
+    versions when you change code." It was not: the fix shipped as
+    0.0.1. Now 0.0.2; later P1 milestones move up one. main.o now
+    rebuilds when VERSION changes, and make test checks --version.
   - make test and make sanitize pass. tam-pane has no fractional
     scaling, so the headless check covers only scale 1.
 

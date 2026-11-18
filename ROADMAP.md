@@ -5,8 +5,9 @@ of versions. Versions follow semantic versioning: during 0.x, the minor
 number marks a phase's big step and the patch number marks each
 milestone inside it.
 
-**Current version:** 0.0.1 (the skeleton, 2026-11-17; waiting for Fred to
-try it; development continues on branch `dev`).
+**Current version:** 0.0.2 (the skeleton with sharp text on scaled
+outputs, B1; 2026-11-17; waiting for Fred to try it; development
+continues on branch `dev`).
 
 ## Decided
 
@@ -35,13 +36,15 @@ enters a Tamlinux release.
   US keymap and legacy key encoding; a shell runs on a pty; cursor
   movement, erasing, insert and delete, colors and attributes, wide
   characters.
-- **0.0.2** Full-screen programs: the alternate screen, scroll regions,
+- **0.0.2** A fix to 0.0.1: sharp text on scaled outputs, through
+  fractional-scale-v1 and viewporter (B1).
+- **0.0.3** Full-screen programs: the alternate screen, scroll regions,
   origin and insert modes, DEC line-drawing characters, combining
   characters, cursor styles, and damage tracking so only changed cells
   are drawn. Enough for vim, htop, less, yazi and our tam TUIs.
-- **0.0.3** Scrollback, the pointer and wheel, selection, the clipboard
+- **0.0.4** Scrollback, the pointer and wheel, selection, the clipboard
   and primary selection, bracketed paste, and mouse reporting.
-- **0.0.4** Integer HiDPI for compositors without fractional scaling
+- **0.0.5** Integer HiDPI for compositors without fractional scaling
   (which 0.0.1 already has), bold
   and italic faces, a fallback font for missing characters, box-drawing
   and block characters drawn by code, and colors and options from a
@@ -82,5 +85,10 @@ enters a Tamlinux release.
 ## How a milestone is done
 
 A milestone is done when its acceptance checks in the phase plan pass and
-Fred has tried the build. When a milestone lands, bump `VERSION` in the
-same change and update the current version here.
+Fred has tried the build.
+
+Every change to the code bumps `VERSION` in the same commit, so each
+build Fred runs says which one it is (`tam-last --version`, checked by
+`make test`). A milestone takes its version when it lands; a fix between
+milestones takes the next patch number, and the milestones after it
+move up one, as 0.0.2 (B1) did.

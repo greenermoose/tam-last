@@ -56,7 +56,7 @@ size is replaced when it is next needed.
   first intermediate byte, and up to 4 bytes of a pending UTF-8
   sequence.
 
-0.0.3 replaces the single grid with pages of rows for scrollback.
+0.0.4 replaces the single grid with pages of rows for scrollback.
 
 ## The font (`include/tam-last/font.h`, `ttf.h`)
 

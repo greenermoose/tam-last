@@ -19,7 +19,7 @@ FILES
                          repeat
 
   Later phases add their own files here, for example scrollback.md
-  (0.0.3) and kitty-keys.md (P2).
+  (0.0.4) and kitty-keys.md (P2).
 
 
 KEEPING IT TRUE

@@ -1,7 +1,8 @@
 # P1: Foundation (0.0.x)
 
-**Status:** in progress. 0.0.1, the skeleton, built on 2026-11-17 and
-waiting for Fred to try it. Next: 0.0.2, full-screen programs.
+**Status:** in progress. 0.0.1, the skeleton, built on 2026-11-17; Fred
+found its text blurry at scale 1.25 (B1). 0.0.2 fixes that and waits for
+Fred to try it. Next: 0.0.3, full-screen programs.
 
 ## Goal
 
@@ -21,9 +22,7 @@ and the test harness that everything later builds on.
   arrays, fd passing, object ids reused after `delete_id`) and
   hand-written requests for the core and xdg-shell interfaces we use.
 - `window.c`: globals, one xdg toplevel, configure and ack, frame
-  callbacks, the seat's keyboard, and fractional scaling
-  (fractional-scale-v1 with viewporter), brought forward from 0.0.4 when
-  Fred found text blurry at scale 1.25 (B1). `shm.c`: two XRGB8888 buffers in POSIX
+  callbacks, the seat's keyboard. `shm.c`: two XRGB8888 buffers in POSIX
   shared memory.
 - `font/`: TrueType tables (head, hhea, hmtx, maxp, cmap formats 4 and
   12, loca, glyf with composites), an exact-area rasterizer, vertical
@@ -39,7 +38,14 @@ and the test harness that everything later builds on.
   socket, the pty and a SIGCHLD pipe; the program's exit status becomes
   ours.
 
-### 0.0.2: full-screen programs
+### 0.0.2: sharp text on scaled outputs (B1)
+
+- Fractional scaling (fractional-scale-v1 with viewporter), brought
+  forward from the last P1 milestone when Fred found 0.0.1's text blurry
+  at scale 1.25: the buffer is drawn in device pixels, with the font at
+  96 dpi times the scale, and shown at the window's logical size.
+
+### 0.0.3: full-screen programs
 
 - Alternate screen (47, 1047, 1049) with saved cursor.
 - Scroll regions (DECSTBM), origin mode, insert mode (IRM), reverse wrap
@@ -51,7 +57,7 @@ and the test harness that everything later builds on.
 - Damage tracking: only rows that changed are drawn and damaged, and
   scrolling moves pixels instead of redrawing.
 
-### 0.0.3: scrollback and the pointer
+### 0.0.4: scrollback and the pointer
 
 - Scrollback in fixed-size pages with a cap (ghostty's page list and
   foot's ring are the models), wheel and Shift+PgUp/PgDn.
@@ -60,7 +66,7 @@ and the test harness that everything later builds on.
   paste (2004).
 - Mouse reporting (1000, 1002, 1003, 1006).
 
-### 0.0.4: looks
+### 0.0.5: looks
 
 - HiDPI without fractional-scale-v1: wl_surface preferred buffer scale
   (compositor v6), for compositors that offer only integer scales.
@@ -83,7 +89,7 @@ and the test harness that everything later builds on.
   through libtam's `tam_key`.
 - Fred tries each version. Agents run the exhaustive checks; Fred's
   checks stay short.
-- 0.0.1 only: Fred compares tam-last and foot side by side, same font and
+- 0.0.1 and 0.0.2: Fred compares tam-last and foot side by side, same font and
   size. If our text looks worse, the FreeType fallback (below) is the
   next step.
 

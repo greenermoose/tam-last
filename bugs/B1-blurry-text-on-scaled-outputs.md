@@ -3,7 +3,7 @@
 - **Status:** Fix available
 - **Severity:** high
 - **Affected versions:** 0.0.1 (first build)
-- **Fixed in:** 0.0.1 (second build, before Fred accepted 0.0.1)
+- **Fixed in:** 0.0.2
 - **Reported:** 2026-11-17, by Fred, with a screenshot beside two foot
   windows
 

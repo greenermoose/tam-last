@@ -21,7 +21,7 @@ NEEDED.
   - **Planned exit:** none; it is part of standard C.
 - **libtam** (static, `$(LIBTAM_PREFIX)/lib/libtam.a`)
   - **Why:** `tam_uni`: UTF-8 decoding and character widths. The tests
-    also use `tam_key` for the round trip. From 0.0.4, `tam_ini` for the
+    also use `tam_key` for the round trip. From 0.0.5, `tam_ini` for the
     configuration file and `tam_path` for its location.
   - **Planned exit:** none; it is the goal.
 

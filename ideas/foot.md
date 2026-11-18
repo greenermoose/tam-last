@@ -11,12 +11,12 @@ The full evaluation is `arch/foot-evaluation.md`.
 
 - **Draw on the frame callback** — adopt (P1, 0.0.1). Coalesces output
   bursts into one frame and costs nothing when idle.
-- **Rows in a power-of-two ring** — adopt (P1, 0.0.3). Scrollback and
+- **Rows in a power-of-two ring** — adopt (P1, 0.0.4). Scrollback and
   screen are one structure.
 - **Scroll by moving the buffer offset in a memfd and punching holes**
-  — consider (P1, 0.0.2). Zero-copy scrolling; Linux-specific
+  — consider (P1, 0.0.3). Zero-copy scrolling; Linux-specific
   (`fallocate`), so it needs a portable fallback for musl and the BSDs.
-- **Box drawing by code** — adopt (P1, 0.0.4).
+- **Box drawing by code** — adopt (P1, 0.0.5).
 - **Server mode with a thin client** — adopt (P3, 0.2.3).
 - **`foot-ctlseqs(7)`, one manual page listing every sequence** — adopt
   (P3, 0.2.1), as our own `tam-last-ctlseqs`.
