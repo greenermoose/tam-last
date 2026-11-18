@@ -6,8 +6,8 @@ number marks a phase's big step and the patch number marks each
 milestone inside it.
 
 **Current version:** 0.0.2 (the skeleton with sharp text on scaled
-outputs, B1; 2026-11-17; waiting for Fred to try it; development
-continues on branch `dev`).
+outputs, B1; 2026-11-17). Fred found its text as crisp as foot's, so
+FreeType stays out. Development continues on branch `dev`.
 
 ## Decided
 
@@ -22,7 +22,8 @@ Fred decided these on 2026-11-17:
   compositor's XKB keymap is not read.
 - Text is drawn from TrueType fonts by our own rasterizer from the start.
   FreeType is the fallback: it comes in only if Fred, comparing tam-last
-  and foot side by side, finds our text worse.
+  and foot side by side, finds our text worse. He compared 0.0.2 the same
+  day and found it as crisp as foot's.
 - The repository copies the structure of tam-pane and tam-clam.
 
 The versions below are a proposal. Fred has not yet set when tam-last

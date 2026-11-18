@@ -45,6 +45,8 @@ DONE
     versions when you change code." It was not: the fix shipped as
     0.0.1. Now 0.0.2; later P1 milestones move up one. main.o now
     rebuilds when VERSION changes, and make test checks --version.
+  - Fred tried 0.0.2 on DP-2 beside foot: "It is. Mark B1 verified."
+    The text is as crisp as foot's; FreeType stays out.
   - make test and make sanitize pass. tam-pane has no fractional
     scaling, so the headless check covers only scale 1.
 
@@ -56,9 +58,6 @@ FAILED
 
 HANDOFF
 
-  - Fred compares again on DP-2, beside foot (B1). The scaled path has
-    not run on a real compositor yet. If text is still worse than
-    foot's, FreeType comes in (plans/P1-foundation.md).
   - Bold text is drawn with the regular face; foot uses the bold face.
     Bold and italic faces are 0.0.4.
   - Next is 0.0.2: full-screen programs (plans/P1-foundation.md).

@@ -1,8 +1,8 @@
 # P1: Foundation (0.0.x)
 
 **Status:** in progress. 0.0.1, the skeleton, built on 2026-11-17; Fred
-found its text blurry at scale 1.25 (B1). 0.0.2 fixes that and waits for
-Fred to try it. Next: 0.0.3, full-screen programs.
+found its text blurry at scale 1.25 (B1). 0.0.2 fixes that; Fred
+verified it on 2026-11-17. Next: 0.0.3, full-screen programs.
 
 ## Goal
 
@@ -89,22 +89,23 @@ and the test harness that everything later builds on.
   through libtam's `tam_key`.
 - Fred tries each version. Agents run the exhaustive checks; Fred's
   checks stay short.
-- 0.0.1 and 0.0.2: Fred compares tam-last and foot side by side, same font and
-  size. If our text looks worse, the FreeType fallback (below) is the
-  next step.
+- 0.0.1 and 0.0.2: Fred compares tam-last and foot side by side, same
+  font and size. Done on 2026-11-17: 0.0.1 was blurry at scale 1.25
+  (B1); 0.0.2 is as crisp as foot, so the FreeType fallback is not
+  needed.
 
 ## Dependencies
 
 - Uses: libc, libm, libtam (static: `tam_uni` today).
 - Added in this phase: none.
-- The FreeType fallback, only if the font comparison fails: FreeType
-  built with zlib, bzip2, png, brotli and harfbuzz off, recorded in
-  `arch/dependencies.md` with a planned exit.
+- The FreeType fallback was not needed: Fred found 0.0.2's text as
+  crisp as foot's (2026-11-17).
 
 ## Risks
 
 - **Text quality without hinting.** Vertical grid fitting covers most of
-  what hinting does at terminal sizes; the side-by-side check decides.
+  what hinting does at terminal sizes; Fred's side-by-side check passed
+  for JetBrains Mono at 9 pt. Other fonts and sizes may differ.
 - **Wayland edge cases without libwayland.** Every opcode is checked
   against the XML in the tests, and the headless run exercises a real
   compositor. New interfaces get the same two checks.

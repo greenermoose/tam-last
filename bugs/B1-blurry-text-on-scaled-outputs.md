@@ -1,6 +1,6 @@
 # B1: Blurry text on scaled outputs
 
-- **Status:** Fix available
+- **Status:** Verified
 - **Severity:** high
 - **Affected versions:** 0.0.1 (first build)
 - **Fixed in:** 0.0.2
@@ -36,4 +36,5 @@ the buffer at the logical size times the scale (rounded as the protocol
 asks), and sets the viewport destination to the logical size. The tests
 check the new opcodes against the XML, and `tests/test_render.c` writes
 a sample at 120 dpi (scale 1.25): cells of 9 x 20 device pixels.
-Waiting for Fred to check it on DP-2.
+Verified by Fred on 2026-11-17: tam-last 0.0.2 on DP-2 (scale 1.25),
+beside foot, has text as crisp as foot's.

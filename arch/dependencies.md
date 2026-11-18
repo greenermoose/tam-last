@@ -50,10 +50,9 @@ NEEDED.
   compositor's XKB keymap is received and closed unread.
 - **FreeType, fontconfig, harfbuzz** (foot through fcft, and almost every
   other terminal): our own TrueType parser and rasterizer, and a short
-  list of font paths. Fallback decided by Fred on 2026-11-17: if our text
-  looks worse than foot's side by side, FreeType comes in, built with
-  zlib, bzip2, png, brotli and harfbuzz off, and listed here with a
-  planned exit.
+  list of font paths. Fred decided on 2026-11-17 that FreeType would come
+  in only if our text looked worse than foot's side by side; on the same
+  day he found 0.0.2's text as crisp as foot's, so it stays out.
 - **pixman** (foot): our own fills and alpha blending.
 - **utf8proc** (foot, for grapheme clusters): libtam's `tam_uni` and the
   C library's `wcwidth` for now; grapheme clusters are an open point.
