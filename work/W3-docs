@@ -58,28 +58,5 @@ FAILED
 
 HANDOFF
 
-  Fred accepted 0.0.2's text and asked for 0.0.3 in a new session. In
-  order:
-
-  - 0.0.3, full-screen programs: the list and acceptance checks are in
-    plans/P1-foundation.md. Set VERSION to 0.0.3 in the same commit as
-    the first code change; make test checks tam-last --version.
-  - Scroll regions touch every scroll in src/term.c: linefeed, ESC M,
-    IL/DL (CSI L, M) and SU/SD (CSI S, T) call scroll_up and scroll_down
-    with the whole screen as the region today. Give those two a bottom
-    margin as well as a top, and route every caller through the region.
-  - The alternate screen needs a second grid and its own saved cursor.
-    Resize must handle both grids.
-  - Damage tracking: today every frame redraws everything (render.c,
-    main.c draw). Track dirty rows in tl_term, draw and damage only
-    those, and keep the full redraw for resizes and scale changes.
-    Damage is in buffer pixels (damage_buffer). Each of the two buffers
-    needs the rows it has missed, so keep damage per buffer.
-  - Tests: new sequences in tests/test_vt.c; check render output by eye
-    with build/tests/render-96dpi.ppm and render-120dpi.ppm. The headless
-    check (tam-pane) has no keyboard and no fractional scaling; Fred
-    tries vim, htop, less and yazi himself on DP-2 (scale 1.25).
-  - Not in 0.0.3: bold and italic faces and the fallback font are 0.0.5;
-    CJK shows the missing-glyph box until then.
-  - Open points for Fred are in each plan, notably TERM (P1), where
-    layouts live and kitty decoding in libtam (P2).
+  - Next is 0.0.3, full-screen programs. The detailed handoff that was
+    here moved to work/WHATNOW in W4.

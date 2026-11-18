@@ -1,0 +1,72 @@
+WHATNOW
+
+What tam-last is doing now and what comes next. Read this first; revise
+it at the end of every session (work/README-work).
+
+Updated: 2026-11-17, with W4
+
+
+STATE
+
+  Version 0.0.2 on branch dev, pushed. Fred accepted its text on DP-2
+  (scale 1.25) beside foot (bug B1, verified); FreeType stays out.
+
+  What works: our own Wayland client, TrueType rasterizer with vertical
+  grid fitting, fractional scaling, US keymap, legacy xterm key
+  encoding, a shell on a pty, cursor movement, erasing, insert and
+  delete, colors and attributes, wide characters. readelf -d lists only
+  libc and libm. make test and make sanitize pass.
+
+  Recent: W1 built 0.0.1; W2 published to GitHub; W3 wrote the docs and
+  fixed B1 (0.0.2); W4 set up this file.
+
+
+NEXT
+
+  1. 0.0.3, full-screen programs (plans/P1-foundation.md has the list
+     and the acceptance checks). Set VERSION to 0.0.3 in the first code
+     commit; make test checks tam-last --version.
+
+  2. Scroll regions (DECSTBM) touch every scroll in src/term.c:
+     linefeed, ESC M, IL and DL (CSI L, M) and SU and SD (CSI S, T) call
+     scroll_up and scroll_down with the whole screen as the region.
+     Give those two a bottom margin as well as a top, and route every
+     caller through the region. Add origin mode and IRM with it.
+
+  3. The alternate screen (47, 1047, 1049) needs a second grid and its
+     own saved cursor. tl_term_resize must handle both grids.
+
+  4. DEC special graphics (ESC ( 0), combining characters stored with
+     their base cell, and cursor styles (DECSCUSR, no blinking unless
+     asked).
+
+  5. Damage tracking: every frame redraws everything today (render.c,
+     draw() in main.c). Track dirty rows in tl_term, draw and damage
+     only those, and keep the full redraw for resizes and scale
+     changes. Damage is in buffer pixels (damage_buffer). The two
+     buffers alternate, so keep damage per buffer.
+
+  Done when: the P1 acceptance checks pass, and Fred has run vim, htop,
+  less and yazi in it.
+
+
+WAITING FOR FRED
+
+  - Nothing for 0.0.2. For 0.0.3: trying the full-screen programs.
+  - Open points in the plans: TERM (P1); where layouts live and kitty
+    decoding in libtam (P2).
+
+
+WATCH OUT
+
+  - Every code change bumps VERSION in the same commit (ROADMAP.md, "How
+    a milestone is done"). Fred checks tam-last --version.
+  - New escape sequences get checks in tests/test_vt.c. Look at
+    build/tests/render-96dpi.ppm and render-120dpi.ppm by eye.
+  - The headless check runs under tam-pane, which has no keyboard and
+    no fractional scaling. Never open windows on Fred's desktop; he
+    tries builds himself on DP-2 (scale 1.25).
+  - Bold and italic faces and the fallback font are 0.0.5; CJK shows the
+    missing-glyph box until then.
+  - Licences: foot, st, havoc, ghostty, wezterm are MIT; kitty is GPL v3;
+    the Linux console is GPL v2 only, ideas only (UPSTREAM.md).
