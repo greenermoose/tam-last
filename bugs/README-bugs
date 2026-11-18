@@ -5,7 +5,7 @@ This folder tracks tam-last's defects: one file per bug.
 
 NAMING
 
-  B<n>-<short-name>.md, for example B1-heredoc-lost-after-pipe.md.
+  B<n>-<short-name>.md, for example B1-wide-char-cut-at-margin.md.
   Numbers count up from B1 and are never reused, even for a bug that is
   closed as a duplicate. Check the index below and the Git history before
   taking a number.
@@ -29,9 +29,10 @@ SEVERITY
 
   Describes impact, not confidence or schedule.
 
-  critical  crashes the shell, loses history or data, runs a command
-            other than the one written, or locks the user out
-  high      breaks a core feature (parsing, expansion, jobs, history)
+  critical  crashes the terminal, sends the program bytes other than
+            the keys pressed, loses or garbles what the program wrote,
+            or lets program output act outside the terminal
+  high      breaks a core feature (keys, drawing, the parser, resizing)
             with no workaround
   medium    a feature misbehaves but a workaround exists
   low       cosmetic or rare

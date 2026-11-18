@@ -3,7 +3,8 @@ W1 TAM-LAST SCAFFOLD AND THE 0.0.1 SKELETON
 Date: 2026-11-17
 AI harness: Claude Code 2.1.326
 AI model: claude-opus-5-5
-Commits: see git log; this record is in the session's last commit
+Commits: 0f6b68c, 4ff9063, and the commit that adds this version of
+  the record
 
 
 GUIDANCE
@@ -33,8 +34,9 @@ GUIDANCE
 DONE
 
   - Repository: LICENSE (GPL v3), README, COPYRIGHT, UPSTREAM.md,
-    AI_PROVENANCE.md, VERSION 0.0.1, plain Makefile, tools/pull-references
-    with ideas/sources (foot, havoc, st, kitty, alacritty, ghostty,
+    AI_PROVENANCE.md, ROADMAP.md, VERSION 0.0.1, plain Makefile, and
+    the arch, ideas, plans (P1 to P5), bugs and work folders.
+    tools/pull-references with ideas/sources (foot, havoc, st, kitty, alacritty, ghostty,
     wezterm, libxkbcommon, stb, wayland; all cloned under ~/Code).
   - 0.0.1 in C11: own Wayland wire client (src/wl), xdg toplevel and
     keyboard (window.c), shm buffers, TrueType glyf parser and exact-area
@@ -42,6 +44,13 @@ DONE
     parser and screen (vt.c, term.c), renderer with the Tokyo Night theme
     palette, own evdev table, US keymap and legacy xterm encoding (keys/),
     pty, poll loop with no idle timeout.
+  - arch/key-path.md tells the whole path from keyboard to program and
+    back. ideas/: foot, havoc, st and kitty's protocol read from source;
+    ghostty, alacritty, wezterm, xterm and the Linux console as starter
+    notes; synthesis.md by topic. havoc is the precedent for our font
+    approach (a trimmed stb_truetype, no FreeType).
+  - Cells were 8 px wide at first: x-height fitting scaled both axes.
+    Fitting is now vertical only, as FreeType's v40 hinting does.
   - Checked: no warnings; make test and make sanitize pass (5 unit suites,
     about 3,450 checks, plus the headless run under tam-pane: window
     maps, command exit status passes through). readelf -d: libc and libm
@@ -58,13 +67,11 @@ FAILED
 
 HANDOFF
 
-  - Not yet written (the session hit its usage limit): ROADMAP.md;
-    arch/ (README-arch, principles.md, dependencies.md,
-    data-structures.md, key-path.md, foot-evaluation.md); ideas/ (one
-    file per terminal plus README-ideas and synthesis.md); plans/
-    (README-plans, P1 to P5, from the approved plan); bugs/README-bugs
-    needs a tam-last severity list.
-  - Not yet done: private provenance ledger row; create
-    greenermoose/tam-last and push dev (Fred approved); tam-work finish.
-  - Fred tries 0.0.1 in Hyprland: build/tam-last; ls --color, Ctrl+C,
-    arrows, resize, exit. Then the font comparison with foot side by side.
+  - Fred tries 0.0.1 in Hyprland: ~/Code/tamlinux/tam-last/build/tam-last;
+    ls --color, Ctrl+C, arrows, resize, exit. Key input has only been
+    tested in unit tests, not through a compositor.
+  - Then the font comparison: tam-last and foot side by side, 9 pt. If
+    ours looks worse, FreeType comes in (plans/P1-foundation.md).
+  - Next is 0.0.2: full-screen programs (plans/P1-foundation.md).
+  - Open points for Fred are in each plan, notably TERM (P1), where
+    layouts live and kitty decoding in libtam (P2).

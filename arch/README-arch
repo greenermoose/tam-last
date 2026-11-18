@@ -1,0 +1,30 @@
+ARCHITECTURE
+
+This folder documents tam-last's system architecture: the modules and how
+they connect, the path a key press takes, the data structures, the
+dependencies, and the evaluations of other terminals that shaped them.
+
+
+FILES
+
+  principles.md          the design rules every change follows
+  key-path.md            every hop from a finger on a key to a program
+                         reading bytes, and back to the screen: what
+                         happens at each, and who controls it
+  data-structures.md     the wire buffers, the screen, the font cache
+                         and the keyboard state, as built today
+  dependencies.md        every library tam-last uses, why, and which
+                         version removes it
+  foot-evaluation.md     how foot works; what to take and what not to
+                         repeat
+
+  Later phases add their own files here, for example scrollback.md
+  (0.0.3) and kitty-keys.md (P2).
+
+
+KEEPING IT TRUE
+
+  These documents describe the code as it is. A change that alters a
+  structure, an algorithm or a dependency updates the matching file in
+  the same commit. Where code and document disagree, the code is right
+  and the document is a bug.
