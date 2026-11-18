@@ -1,6 +1,6 @@
 /* Hand-written Wayland requests. Opcodes and argument order come from
- * protocols/wayland.xml and protocols/xdg-shell.xml; tests/test_wire.c
- * checks a sample of them against the XML. */
+ * the XML files in protocols/; tests/test_wire.c checks every one we
+ * send against them. */
 #include "tam-last/proto.h"
 
 #include <stddef.h>
@@ -223,4 +223,36 @@ void tl_toplevel_set_app_id(struct tl_wire *w, uint32_t toplevel,
 	tl_msg_init(&m);
 	tl_msg_str(&m, app_id);
 	(void)tl_wire_send(w, toplevel, 3, &m);
+}
+
+uint32_t tl_viewporter_get_viewport(struct tl_wire *w, uint32_t viewporter,
+	uint32_t surface, void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_VIEWPORT, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	tl_msg_u32(&m, surface);
+	return send_new(w, viewporter, 1, &m, id);
+}
+
+void tl_viewport_set_destination(struct tl_wire *w, uint32_t viewport,
+	int32_t width, int32_t height)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_i32(&m, width);
+	tl_msg_i32(&m, height);
+	(void)tl_wire_send(w, viewport, 2, &m);
+}
+
+uint32_t tl_fractional_get(struct tl_wire *w, uint32_t manager,
+	uint32_t surface, void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_FRACTIONAL_SCALE, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	tl_msg_u32(&m, surface);
+	return send_new(w, manager, 1, &m, id);
 }

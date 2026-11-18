@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Grid to pixels. Writes OUTDIR/render.ppm, a sample screen drawn with
- * the real terminal font when it is installed, to look at by eye. */
+/* Grid to pixels. Writes OUTDIR/render-96dpi.ppm and render-120dpi.ppm,
+ * sample screens drawn with the real terminal font when it is installed,
+ * to look at by eye. */
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,9 +71,13 @@ int main(int argc, char **argv)
 	tl_term_free(&t);
 	tl_font_close(&font);
 
-	/* A sample screen with the real font. */
+	/* Sample screens with the real font, at scale 1 (96 dpi) and at
+	 * 1.25 (120 dpi, as on Fred's DP-1 and DP-2). */
 	const char *path = tl_font_find(NULL);
-	if (path != NULL && tl_font_open(&font, path, 9, 96, err, sizeof(err)) == 0) {
+	static const int dpis[] = { 96, 120 };
+	for (int k = 0; path != NULL && k < 2; k++) {
+		if (tl_font_open(&font, path, 9, dpis[k], err, sizeof(err)) != 0)
+			break;
 		CHECK(tl_term_init(&t, 64, 12) == 0);
 		feed(&t, "\033[32mfred@bosgame\033[0m:\033[34m~/Code/tamlinux/tam-last\033[0m$ ls --color\r\n"
 			"\033[1;34march\033[0m  \033[1;34mbuild\033[0m  COPYRIGHT  LICENSE  Makefile  README\r\n"
@@ -90,10 +95,10 @@ int main(int argc, char **argv)
 		CHECK(px != NULL);
 		tl_render(&t, &font, &pal, px, w, h, 2, true);
 		char out[512];
-		snprintf(out, sizeof(out), "%s/render.ppm", outdir);
+		snprintf(out, sizeof(out), "%s/render-%ddpi.ppm", outdir, dpis[k]);
 		CHECK(write_ppm(out, px, w, h) == 0);
-		printf("test_render: wrote %s (%s, %dx%d cells of %dx%d px)\n", out,
-			path, t.cols, t.rows, font.cell_w, font.cell_h);
+		printf("test_render: wrote %s (%s, cells of %dx%d px)\n", out,
+			path, font.cell_w, font.cell_h);
 		free(px);
 		tl_term_free(&t);
 		tl_font_close(&font);

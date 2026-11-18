@@ -21,7 +21,9 @@ and the test harness that everything later builds on.
   arrays, fd passing, object ids reused after `delete_id`) and
   hand-written requests for the core and xdg-shell interfaces we use.
 - `window.c`: globals, one xdg toplevel, configure and ack, frame
-  callbacks, the seat's keyboard. `shm.c`: two XRGB8888 buffers in POSIX
+  callbacks, the seat's keyboard, and fractional scaling
+  (fractional-scale-v1 with viewporter), brought forward from 0.0.4 when
+  Fred found text blurry at scale 1.25 (B1). `shm.c`: two XRGB8888 buffers in POSIX
   shared memory.
 - `font/`: TrueType tables (head, hhea, hmtx, maxp, cmap formats 4 and
   12, loca, glyf with composites), an exact-area rasterizer, vertical
@@ -60,8 +62,8 @@ and the test harness that everything later builds on.
 
 ### 0.0.4: looks
 
-- HiDPI: wl_surface preferred buffer scale (compositor v6), then
-  fractional-scale-v1 with viewporter.
+- HiDPI without fractional-scale-v1: wl_surface preferred buffer scale
+  (compositor v6), for compositors that offer only integer scales.
 - Bold and italic faces from sibling font files; a fallback font for
   characters the main font lacks (CJK, emoji outlines).
 - Box-drawing, block and Braille characters drawn by code, so lines join

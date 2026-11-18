@@ -70,5 +70,7 @@ RECORD TEMPLATE
 
 INDEX
 
-  No bugs recorded yet. Add one line per bug: its file name and title.
-  Read the record for its status; the index does not repeat it.
+  Add one line per bug: its file name and title. Read the record for its
+  status; the index does not repeat it.
+
+  B1-blurry-text-on-scaled-outputs.md   Blurry text on scaled outputs

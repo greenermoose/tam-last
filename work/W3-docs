@@ -3,7 +3,8 @@ W3 ROADMAP, PLANS, ARCHITECTURE AND IDEAS
 Date: 2026-11-17
 AI harness: Claude Code 2.1.326
 AI model: claude-opus-5-5
-Commits: 9c557be, and the commit that adds this record
+Commits: 9c557be, 88ec71f, and the commit that adds this version of
+  the record
 Continues: W2
 
 The same Claude session as W1, resumed after a usage limit. W2 (Codex)
@@ -12,7 +13,12 @@ published dev to GitHub in between.
 
 GUIDANCE
 
-  Fred's opening request and planning answers are quoted in W1.
+  Fred's opening request and planning answers are quoted in W1. After
+  trying 0.0.1, with a screenshot:
+
+    "The two foot terminals are on the left. The tam-last terminal is
+    on the right. The foot terminals have crisp fonts. The tam-last
+    terminal has blurry fonts."
 
 
 DONE
@@ -29,7 +35,14 @@ DONE
     precedent for our font approach: a trimmed stb_truetype, no FreeType,
     and a fallback font compiled in (a "consider" for 0.0.4).
   - bugs/README-bugs: severity levels for a terminal.
-  - make test still passes; no code changed.
+  - B1, blurry text: tam-last was on DP-2 at scale 1.25 and drew at
+    scale 1, so Hyprland stretched it. Not the rasterizer, so FreeType
+    stays out for now. Fixed with fractional-scale-v1 and viewporter
+    (brought forward from 0.0.4): the buffer is drawn at device pixels,
+    the font is opened at 96 dpi times the scale. 9 pt at 1.25 gives
+    9 x 20 cells, as foot. test_render now also writes a 120 dpi sample.
+  - make test and make sanitize pass. tam-pane has no fractional
+    scaling, so the headless check covers only scale 1.
 
 
 FAILED
@@ -39,11 +52,11 @@ FAILED
 
 HANDOFF
 
-  - Fred tries 0.0.1 in Hyprland: ~/Code/tamlinux/tam-last/build/tam-last;
-    ls --color, Ctrl+C, arrows, resize, exit. Key input has been tested
-    only in unit tests, not through a compositor.
-  - Then the font comparison: tam-last and foot side by side at 9 pt. If
-    ours looks worse, FreeType comes in (plans/P1-foundation.md).
+  - Fred compares again on DP-2, beside foot (B1). The scaled path has
+    not run on a real compositor yet. If text is still worse than
+    foot's, FreeType comes in (plans/P1-foundation.md).
+  - Bold text is drawn with the regular face; foot uses the bold face.
+    Bold and italic faces are 0.0.4.
   - Next is 0.0.2: full-screen programs (plans/P1-foundation.md).
   - Open points for Fred are in each plan, notably TERM (P1), where
     layouts live and kitty decoding in libtam (P2).

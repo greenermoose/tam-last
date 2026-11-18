@@ -31,6 +31,10 @@ enum tl_iface {
 	TL_IF_WM_BASE,
 	TL_IF_XDG_SURFACE,
 	TL_IF_XDG_TOPLEVEL,
+	TL_IF_VIEWPORTER,
+	TL_IF_VIEWPORT,
+	TL_IF_FRACTIONAL_MANAGER,
+	TL_IF_FRACTIONAL_SCALE,
 	/* Destroyed by us, waiting for the server's delete_id. */
 	TL_IF_ZOMBIE
 };

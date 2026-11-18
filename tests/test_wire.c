@@ -66,6 +66,8 @@ int main(void)
 	int sv[2];
 	struct tl_event ev;
 	const char *wl = "protocols/wayland.xml", *xdg = "protocols/xdg-shell.xml";
+	const char *vp = "protocols/viewporter.xml";
+	const char *fs = "protocols/fractional-scale-v1.xml";
 
 	CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
 	tl_wire_init(&client, sv[0]);
@@ -166,6 +168,9 @@ int main(void)
 	REQ(xdg, "xdg_surface", "ack_configure", tl_xdg_surface_ack_configure(&client, 9, 1));
 	REQ(xdg, "xdg_toplevel", "set_title", tl_toplevel_set_title(&client, 10, "t"));
 	REQ(xdg, "xdg_toplevel", "set_app_id", tl_toplevel_set_app_id(&client, 10, "a"));
+	REQ(vp, "wp_viewporter", "get_viewport", tl_viewporter_get_viewport(&client, 11, 4, NULL));
+	REQ(vp, "wp_viewport", "set_destination", tl_viewport_set_destination(&client, 12, 640, 480));
+	REQ(fs, "wp_fractional_scale_manager_v1", "get_fractional_scale", tl_fractional_get(&client, 13, 4, NULL));
 	for (size_t i = 0; i < server.in_nfds; i++)
 		close(server.in_fds[i]);
 	server.in_nfds = 0;
@@ -191,6 +196,7 @@ int main(void)
 	EVT(xdg, "xdg_surface", "configure", TL_XDG_SURFACE_CONFIGURE);
 	EVT(xdg, "xdg_toplevel", "configure", TL_TOPLEVEL_CONFIGURE);
 	EVT(xdg, "xdg_toplevel", "close", TL_TOPLEVEL_CLOSE);
+	EVT(fs, "wp_fractional_scale_v1", "preferred_scale", TL_FRACTIONAL_PREFERRED_SCALE);
 
 	tl_wire_close(&client);
 	tl_wire_close(&server);

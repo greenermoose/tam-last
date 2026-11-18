@@ -41,7 +41,8 @@ enters a Tamlinux release.
   are drawn. Enough for vim, htop, less, yazi and our tam TUIs.
 - **0.0.3** Scrollback, the pointer and wheel, selection, the clipboard
   and primary selection, bracketed paste, and mouse reporting.
-- **0.0.4** HiDPI (preferred buffer scale, then fractional scale), bold
+- **0.0.4** Integer HiDPI for compositors without fractional scaling
+  (which 0.0.1 already has), bold
   and italic faces, a fallback font for missing characters, box-drawing
   and block characters drawn by code, and colors and options from a
   configuration file (`tam_ini`), starting from the Tamlinux theme.

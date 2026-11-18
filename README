@@ -35,7 +35,9 @@ WHAT IT DOES
   - Its own TrueType rasterizer: it reads the font file's glyf outlines
     and draws them antialiased, with the x-height snapped to the pixel
     grid. There is no FreeType and no fontconfig. JetBrains Mono at 9
-    points makes 7 x 17 pixel cells, as in foot.
+    points makes 7 x 17 pixel cells, as in foot. On scaled outputs (1.25,
+    say) it draws at the output's real resolution, through the
+    fractional-scale and viewporter protocols, so text stays sharp.
   - Its own keymap: the compositor's evdev key codes are turned into
     characters by tables compiled into tam-last (a US layout for now).
     There is no xkbcommon.

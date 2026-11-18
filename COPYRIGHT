@@ -31,5 +31,10 @@ changed. The notices for those projects follow.
                                2015-2017 Samsung Electronics Co., Ltd,
                                2015-2017 Red Hat Inc. (MIT-style licence,
                                in the file)
+    protocols/viewporter.xml   Copyright 2013-2016 Collabora, Ltd.
+                               (MIT-style licence, in the file)
+    protocols/fractional-scale-v1.xml
+                               Copyright 2022 Kenny Levinsen (MIT-style
+                               licence, in the file)
 
   When code is taken, its project's notice goes here in the same change.

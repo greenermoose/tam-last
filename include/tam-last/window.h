@@ -24,11 +24,16 @@ struct tl_window_events {
 	/* The compositor's modifier state, in XKB's real-modifier bits. */
 	void (*modifiers)(void *ud, uint32_t depressed, uint32_t locked);
 	void (*repeat_info)(void *ud, int32_t rate, int32_t delay);
+	/* The compositor's preferred scale for this window, in 120ths:
+	 * 120 is 1, 150 is 1.25. Only sent when fractional scaling works. */
+	void (*scale)(void *ud, uint32_t scale120);
 };
 
 struct tl_window {
 	struct tl_wire wire;
 	uint32_t registry, compositor, shm, seat, wm_base;
+	uint32_t viewporter, fractional_manager, viewport, fractional;
+	int dest_w, dest_h; /* the viewport destination last set */
 	uint32_t surface, xdg_surface, toplevel, keyboard, frame_cb, sync_cb;
 	uint32_t seat_version;
 	bool synced;
@@ -56,8 +61,13 @@ int tl_window_flush(struct tl_window *win);
 /* A free buffer of this size, or NULL when both are still busy. */
 struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
 	int height);
-/* Attach, damage all, ask for a frame callback, commit. */
-void tl_window_present(struct tl_window *win, struct tl_buffer *b);
+/* Attach, damage all, ask for a frame callback, commit. With fractional
+ * scaling, the buffer is in device pixels and is shown at the window's
+ * size in logical pixels, width x height; otherwise those are ignored. */
+void tl_window_present(struct tl_window *win, struct tl_buffer *b,
+	int width, int height);
+/* True when the window can draw at a fractional scale. */
+bool tl_window_can_scale(const struct tl_window *win);
 bool tl_window_frame_pending(const struct tl_window *win);
 
 #endif

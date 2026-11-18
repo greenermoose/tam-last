@@ -6,8 +6,13 @@ next.
 ## The application (`src/main.c`)
 
 `struct app` holds one of each: the window, the screen, the font, the pty,
-the keyboard state, the palette, the surface size, focus, and key-repeat
-state. There is one window per process until the server mode (P3).
+the keyboard state, the palette, focus, and key-repeat state. Sizes come
+in two units: the window's size in logical pixels, which the compositor
+sets, and the buffer's size in device pixels, which is the logical size
+times the output's scale (in 120ths, from fractional-scale-v1). The font
+is opened at 96 dpi times that scale, so cells, padding and glyphs are
+all in device pixels, and the viewport shows the buffer at the logical
+size. There is one window per process until the server mode (P3).
 
 ## The Wayland connection (`include/tam-last/wire.h`)
 
@@ -27,7 +32,9 @@ state. There is one window per process until the server mode (P3).
 
 ## The window (`include/tam-last/window.h`, `shm.h`)
 
-Ids of the globals and our objects, the pending toplevel size, the frame
+Ids of the globals and our objects (including the viewport and the
+fractional-scale object, when the compositor offers them, and the
+viewport destination last set), the pending toplevel size, the frame
 callback id (non-zero while a frame is in flight), and two
 `struct tl_buffer`: a shared-memory XRGB8888 image, its `wl_buffer` id,
 and a busy flag cleared by `wl_buffer.release`. A buffer of the wrong

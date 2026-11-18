@@ -37,7 +37,9 @@ NEEDED.
 ## Run time, not linked
 
 - **A Wayland compositor** with `wl_compositor` version 4 or later,
-  `wl_shm`, `xdg_wm_base` and a seat.
+  `wl_shm`, `xdg_wm_base` and a seat. With `wp_viewporter` and
+  `wp_fractional_scale_manager_v1` as well, text is sharp on scaled
+  outputs; without them, tam-last draws at scale 1.
 - **A TrueType font** with glyf outlines.
 
 ## What other terminals use that we do not

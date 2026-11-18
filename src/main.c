@@ -39,7 +39,14 @@ struct app {
 	struct tl_pty pty;
 	struct tl_kbd kbd;
 	struct tl_palette pal;
-	int width, height;
+	const char *font_path;
+	float pt;
+	/* The scale in 120ths (fractional-scale-v1). The window is lw x lh
+	 * logical pixels; the buffer and everything drawn in it are
+	 * width x height device pixels, the logical size times the scale. */
+	uint32_t scale120;
+	int lw, lh;
+	int width, height, pad;
 	bool focused;
 	bool need_draw;
 	bool closing;
@@ -103,8 +110,8 @@ static void draw(struct app *a, bool force)
 		return;
 	}
 	tl_render(&a->term, &a->font, &a->pal, b->pixels, b->width, b->height,
-		PAD, a->focused);
-	tl_window_present(&a->win, b);
+		a->pad, a->focused);
+	tl_window_present(&a->win, b, a->lw, a->lh);
 	a->need_draw = false;
 	a->term.dirty = false;
 }
@@ -120,27 +127,79 @@ static void send_key(struct app *a, uint32_t code)
 		(void)tl_pty_queue(&a->pty, seq, n);
 }
 
-static void on_configure(void *ud, int width, int height)
+/* Logical to device pixels, rounded as fractional-scale-v1 asks. */
+static int to_device(const struct app *a, int v)
 {
-	struct app *a = ud;
-	if (width <= 0 || height <= 0) {
-		/* Ours to choose: keep the current grid. */
-		width = a->term.cols * a->font.cell_w + 2 * PAD;
-		height = a->term.rows * a->font.cell_h + 2 * PAD;
-	}
-	a->width = width;
-	a->height = height;
-	int cols = (width - 2 * PAD) / a->font.cell_w;
-	int rows = (height - 2 * PAD) / a->font.cell_h;
+	return (int)(((long)v * a->scale120 + 60) / 120);
+}
+
+static int to_logical(const struct app *a, int v)
+{
+	return (int)(((long)v * 120 + a->scale120 - 1) / a->scale120);
+}
+
+/* Fit the grid to the window's logical size at the current scale. */
+static void layout(struct app *a)
+{
+	a->pad = to_device(a, PAD);
+	a->width = to_device(a, a->lw);
+	a->height = to_device(a, a->lh);
+	int cols = (a->width - 2 * a->pad) / a->font.cell_w;
+	int rows = (a->height - 2 * a->pad) / a->font.cell_h;
 	if (cols < 1)
 		cols = 1;
 	if (rows < 1)
 		rows = 1;
 	if (cols != a->term.cols || rows != a->term.rows) {
 		if (tl_term_resize(&a->term, cols, rows) == 0)
-			tl_pty_resize(&a->pty, cols, rows, width, height);
+			tl_pty_resize(&a->pty, cols, rows, a->width, a->height);
 	}
+}
+
+static void on_configure(void *ud, int width, int height)
+{
+	struct app *a = ud;
+	if (width <= 0 || height <= 0) {
+		/* Ours to choose: keep the current grid. */
+		width = to_logical(a, a->term.cols * a->font.cell_w +
+			2 * to_device(a, PAD));
+		height = to_logical(a, a->term.rows * a->font.cell_h +
+			2 * to_device(a, PAD));
+	}
+	a->lw = width;
+	a->lh = height;
+	layout(a);
 	/* A configure must be answered with a commit at the new size. */
+	draw(a, true);
+}
+
+/* The font at the size it has on this output: pt points at 96 dpi times
+ * the scale. */
+static int open_font(struct app *a, struct tl_font *f, char *err,
+	size_t errlen)
+{
+	int dpi = (int)((96L * a->scale120 + 60) / 120);
+	return tl_font_open(f, a->font_path, a->pt, dpi, err, errlen);
+}
+
+static void on_scale(void *ud, uint32_t scale120)
+{
+	struct app *a = ud;
+	if (scale120 == a->scale120)
+		return;
+	uint32_t old = a->scale120;
+	a->scale120 = scale120;
+	struct tl_font f;
+	char err[300];
+	if (open_font(a, &f, err, sizeof(err)) != 0) {
+		fprintf(stderr, "tam-last: %s\n", err);
+		a->scale120 = old;
+		return;
+	}
+	tl_font_close(&a->font);
+	a->font = f;
+	layout(a);
+	a->term.dirty = true;
 	draw(a, true);
 }
 
@@ -205,7 +264,7 @@ static void on_repeat_info(void *ud, int32_t rate, int32_t delay)
 
 static const struct tl_window_events events = {
 	on_configure, on_close, on_frame, on_key, on_focus_in, on_focus_out,
-	on_modifiers, on_repeat_info,
+	on_modifiers, on_repeat_info, on_scale,
 };
 
 /* Read what the program wrote. Returns false at end of file. */
@@ -294,12 +353,14 @@ int main(int argc, char **argv)
 	tl_palette_default(&a.pal);
 	tl_kbd_init(&a.kbd);
 
-	const char *path = tl_font_find(font_path);
-	if (path == NULL) {
+	a.font_path = tl_font_find(font_path);
+	a.pt = pt;
+	a.scale120 = 120; /* until the compositor says otherwise */
+	if (a.font_path == NULL) {
 		fprintf(stderr, "tam-last: no font found; use --font FILE\n");
 		return 1;
 	}
-	if (tl_font_open(&a.font, path, pt, 96, err, sizeof(err)) != 0) {
+	if (open_font(&a, &a.font, err, sizeof(err)) != 0) {
 		fprintf(stderr, "tam-last: %s\n", err);
 		return 1;
 	}
@@ -307,8 +368,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "tam-last: out of memory\n");
 		return 1;
 	}
-	a.width = DEFAULT_COLS * a.font.cell_w + 2 * PAD;
-	a.height = DEFAULT_ROWS * a.font.cell_h + 2 * PAD;
+	a.pad = PAD;
+	a.width = a.lw = DEFAULT_COLS * a.font.cell_w + 2 * PAD;
+	a.height = a.lh = DEFAULT_ROWS * a.font.cell_h + 2 * PAD;
 
 	if (pipe(sigchld_pipe) != 0) {
 		perror("tam-last: pipe");

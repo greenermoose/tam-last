@@ -44,6 +44,9 @@ None yet.
   2026-11-17) and `protocols/xdg-shell.xml` (wayland-protocols, stable).
   Our hand-written requests in `src/wl/proto.c` follow them, and
   `tests/test_wire.c` checks every opcode we use against them.
+- `protocols/viewporter.xml` (wayland-protocols, stable) and
+  `protocols/fractional-scale-v1.xml` (wayland-protocols, staging), for
+  sharp text on scaled outputs (B1).
 
 ## Compared with, not taken
 

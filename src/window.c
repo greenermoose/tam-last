@@ -37,6 +37,13 @@ static void on_global(struct tl_window *win, struct tl_event *ev)
 	} else if (strcmp(iface, "xdg_wm_base") == 0 && win->wm_base == 0) {
 		win->wm_base = tl_registry_bind(w, win->registry, name, iface, 1,
 			TL_IF_WM_BASE, win);
+	} else if (strcmp(iface, "wp_viewporter") == 0 && win->viewporter == 0) {
+		win->viewporter = tl_registry_bind(w, win->registry, name, iface,
+			1, TL_IF_VIEWPORTER, win);
+	} else if (strcmp(iface, "wp_fractional_scale_manager_v1") == 0 &&
+		   win->fractional_manager == 0) {
+		win->fractional_manager = tl_registry_bind(w, win->registry, name,
+			iface, 1, TL_IF_FRACTIONAL_MANAGER, win);
 	}
 }
 
@@ -193,6 +200,14 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 					win->pending_h);
 		}
 		break;
+	case TL_IF_FRACTIONAL_SCALE:
+		if (ev->opcode == TL_FRACTIONAL_PREFERRED_SCALE) {
+			uint32_t scale = tl_ev_u32(ev);
+			if (!ev->bad && scale >= 120 && scale <= 120 * 8 &&
+			    win->ev->scale != NULL)
+				win->ev->scale(win->ud, scale);
+		}
+		break;
 	case TL_IF_XDG_TOPLEVEL:
 		if (ev->opcode == TL_TOPLEVEL_CONFIGURE) {
 			int32_t width = tl_ev_i32(ev);
@@ -322,6 +337,14 @@ int tl_window_open(struct tl_window *win, const char *title,
 		snprintf(win->err, sizeof(win->err), "cannot create the window");
 		return -1;
 	}
+	/* Fractional scaling needs both: the compositor says the scale, and
+	 * the viewport shows our larger buffer at the window's size. */
+	if (win->viewporter != 0 && win->fractional_manager != 0) {
+		win->viewport = tl_viewporter_get_viewport(w, win->viewporter,
+			win->surface, win);
+		win->fractional = tl_fractional_get(w, win->fractional_manager,
+			win->surface, win);
+	}
 	tl_toplevel_set_title(w, win->toplevel, title);
 	tl_toplevel_set_app_id(w, win->toplevel, app_id);
 	/* The first commit, with no buffer, asks for the first configure. */
@@ -371,9 +394,20 @@ struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
 	return NULL;
 }
 
-void tl_window_present(struct tl_window *win, struct tl_buffer *b)
+bool tl_window_can_scale(const struct tl_window *win)
+{
+	return win->viewport != 0 && win->fractional != 0;
+}
+
+void tl_window_present(struct tl_window *win, struct tl_buffer *b,
+	int width, int height)
 {
 	struct tl_wire *w = &win->wire;
+	if (win->viewport != 0 && (width != win->dest_w || height != win->dest_h)) {
+		tl_viewport_set_destination(w, win->viewport, width, height);
+		win->dest_w = width;
+		win->dest_h = height;
+	}
 	tl_surface_attach(w, win->surface, b->id);
 	tl_surface_damage_buffer(w, win->surface, 0, 0, b->width, b->height);
 	if (win->frame_cb == 0)

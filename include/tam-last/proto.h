@@ -1,7 +1,7 @@
 /* Hand-written Wayland requests for the interfaces tam-last uses, from
- * protocols/wayland.xml and protocols/xdg-shell.xml. Each function queues
- * one request; the ones that create an object return its new id, or 0
- * when it could not be sent. Opcodes are named after the XML. */
+ * the XML files in protocols/. Each function queues one request; the
+ * ones that create an object return its new id, or 0 when it could not
+ * be sent. Opcodes are named after the XML. */
 #ifndef TL_PROTO_H
 #define TL_PROTO_H
 
@@ -22,7 +22,8 @@ enum {
 	TL_WM_BASE_PING = 0,
 	TL_XDG_SURFACE_CONFIGURE = 0,
 	TL_TOPLEVEL_CONFIGURE = 0, TL_TOPLEVEL_CLOSE = 1,
-	TL_TOPLEVEL_CONFIGURE_BOUNDS = 2, TL_TOPLEVEL_WM_CAPABILITIES = 3
+	TL_TOPLEVEL_CONFIGURE_BOUNDS = 2, TL_TOPLEVEL_WM_CAPABILITIES = 3,
+	TL_FRACTIONAL_PREFERRED_SCALE = 0
 };
 
 /* wl_seat capability bits and wl_shm formats. */
@@ -66,5 +67,14 @@ void tl_toplevel_set_title(struct tl_wire *w, uint32_t toplevel,
 	const char *title);
 void tl_toplevel_set_app_id(struct tl_wire *w, uint32_t toplevel,
 	const char *app_id);
+
+/* viewporter: draw a buffer at a size other than its own. */
+uint32_t tl_viewporter_get_viewport(struct tl_wire *w, uint32_t viewporter,
+	uint32_t surface, void *data);
+void tl_viewport_set_destination(struct tl_wire *w, uint32_t viewport,
+	int32_t width, int32_t height);
+/* fractional-scale-v1: the compositor's preferred scale, in 120ths. */
+uint32_t tl_fractional_get(struct tl_wire *w, uint32_t manager,
+	uint32_t surface, void *data);
 
 #endif
