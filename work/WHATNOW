@@ -3,7 +3,7 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-17, with W4
+Updated: 2026-11-19, with W5
 
 
 STATE
@@ -19,6 +19,10 @@ STATE
 
   Recent: W1 built 0.0.1; W2 published to GitHub; W3 wrote the docs and
   fixed B1 (0.0.2); W4 set up this file.
+
+  Follows the tam-idol 0.1.0 standard (W5, 2026-11-19). That change
+  touched READMEs and records only; no code changed, so VERSION stays
+  0.0.2.
 
 
 NEXT

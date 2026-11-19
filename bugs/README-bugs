@@ -1,14 +1,15 @@
 BUGS
 
-This folder tracks tam-last's defects: one file per bug.
+This folder tracks the defects of this repository's project: one file
+per bug.
 
 
 NAMING
 
-  B<n>-<short-name>.md, for example B1-wide-char-cut-at-margin.md.
+  B<n>-<short-name>.md, for example B1-focus-lost-after-unmap.md.
   Numbers count up from B1 and are never reused, even for a bug that is
-  closed as a duplicate. Check the index below and the Git history before
-  taking a number.
+  closed as a duplicate. Check the index below and the Git history
+  before taking a number.
 
 
 STATUS
@@ -29,13 +30,13 @@ SEVERITY
 
   Describes impact, not confidence or schedule.
 
-  critical  crashes the terminal, sends the program bytes other than
-            the keys pressed, loses or garbles what the program wrote,
-            or lets program output act outside the terminal
-  high      breaks a core feature (keys, drawing, the parser, resizing)
-            with no workaround
+  critical  crashes the program or session, loses work or data, or locks
+            the user out
+  high      breaks a core feature with no workaround
   medium    a feature misbehaves but a workaround exists
   low       cosmetic or rare
+
+  IN THIS REPOSITORY, below, names the core features.
 
 
 RECORD TEMPLATE
@@ -49,6 +50,7 @@ RECORD TEMPLATE
     - **Affected versions:** 0.0.1
     - **Fixed in:**
     - **Reported:** YYYY-MM-DD, by whom
+    - **Found by:** R<n>, when a review found it
 
     ## What happens
 
@@ -68,9 +70,22 @@ RECORD TEMPLATE
   boot and time window.
 
 
-INDEX
+BUGS IN OTHER PROJECTS
 
-  Add one line per bug: its file name and title. Read the record for its
-  status; the index does not repeat it.
+  A bug found and fixed in a project we learn from (see ideas/) can
+  teach us about our own code. Note it in that project's ideas file,
+  with a link, and open a B record here only if our code has the same
+  bug.
+
+
+
+IN THIS REPOSITORY
+
+  Core features: keys, drawing, the parser and resizing. A critical bug
+  also includes sending bytes other than the keys pressed, or letting
+  program output act outside the terminal.
+
+  Index: add one line per bug: its file name and title. Read the record
+  for its status; the index does not repeat it.
 
   B1-blurry-text-on-scaled-outputs.md   Blurry text on scaled outputs

@@ -7,6 +7,8 @@ other terminal we can find. Where another terminal's code works well, we
 take it and refactor it into tam-last's own shape. Where it doesn't, we
 leave it out. tam-last is not a fork or a clone of any of them.
 
+Follows the tam-idol 0.1.0 standard.
+
 
 WHY
 
@@ -113,11 +115,13 @@ WHERE THINGS ARE
                    structures, dependencies, evaluations
   plans/           one plan per work phase (P1, P2, ...)
   bugs/            one record per bug (B1, B2, ...)
+  reviews/         one record per review (R1, R2, ...)
   work/            WHATNOW (read it first: what is next) and one record
                    per work session (W1, W2, ...)
   tools/           helper scripts for developing tam-last
   ROADMAP.md       milestones with their version numbers
   UPSTREAM.md      every piece of code we took from another project
+  AI-BLAME.md      how AI work is recorded here
   COPYRIGHT        copyright and license notices
   LICENSE          GNU General Public License, version 3
 
