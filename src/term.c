@@ -14,40 +14,93 @@
 static struct tl_cell blank(const struct tl_term *t)
 {
 	/* Erasing uses the current background (xterm's bce). */
-	return (struct tl_cell){ ' ', TL_COLOR_DEFAULT, t->pen.bg, 0 };
+	return (struct tl_cell){ ' ', { 0, 0 }, TL_COLOR_DEFAULT, t->pen.bg, 0, 0 };
+}
+
+static void mark_row(struct tl_term *t, int y)
+{
+	if (y >= 0 && y < t->rows && t->dirty_rows != NULL) {
+		t->dirty_rows[y] = true;
+		t->dirty = true;
+	}
+}
+
+static void mark_rows(struct tl_term *t, int y0, int y1)
+{
+	if (y0 < 0)
+		y0 = 0;
+	if (y1 > t->rows)
+		y1 = t->rows;
+	for (int y = y0; y < y1; y++)
+		mark_row(t, y);
+}
+
+static void mark_all(struct tl_term *t)
+{
+	t->full_dirty = true;
+	t->dirty = true;
+	mark_rows(t, 0, t->rows);
 }
 
 static void fill(struct tl_term *t, int x0, int y, int x1)
 {
 	struct tl_cell b = blank(t);
+	if (y < 0 || y >= t->rows)
+		return;
 	if (x0 < 0)
 		x0 = 0;
 	if (x1 > t->cols)
 		x1 = t->cols;
 	for (int x = x0; x < x1; x++)
 		*tl_term_cell(t, x, y) = b;
-	t->dirty = true;
+	mark_row(t, y);
 }
 
 static void fill_rows(struct tl_term *t, int y0, int y1)
 {
+	if (y0 < 0)
+		y0 = 0;
+	if (y1 > t->rows)
+		y1 = t->rows;
 	for (int y = y0; y < y1; y++)
 		fill(t, 0, y, t->cols);
 }
 
+static void clear_grid(struct tl_cell *cells, int cols, int rows)
+{
+	struct tl_cell b = { ' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0 };
+	size_t n = (size_t)cols * (size_t)rows;
+	for (size_t i = 0; i < n; i++)
+		cells[i] = b;
+}
+
 static void reset(struct tl_term *t)
 {
+	if (t->alt_screen) {
+		struct tl_cell *tmp = t->cells;
+		t->cells = t->alt_cells;
+		t->alt_cells = tmp;
+		t->alt_screen = false;
+	}
 	t->pen = (struct tl_pen){ TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0 };
 	t->cx = t->cy = 0;
+	t->scroll_top = 0;
+	t->scroll_bottom = t->rows - 1;
 	t->wrap_next = false;
+	t->origin_mode = false;
+	t->insert_mode = false;
+	t->dec_gfx = false;
+	t->cursor_style = TL_CURSOR_BLOCK;
 	t->cursor_visible = true;
 	t->autowrap = true;
 	t->app_cursor = false;
 	t->app_keypad = false;
-	t->saved.cx = t->saved.cy = 0;
-	t->saved.wrap_next = false;
-	t->saved.pen = t->pen;
+	t->saved = (struct tl_saved){ 0, 0, false, false, false, t->pen };
+	t->alt_saved = t->saved;
 	fill_rows(t, 0, t->rows);
+	if (t->alt_cells != NULL)
+		clear_grid(t->alt_cells, t->cols, t->rows);
+	mark_all(t);
 }
 
 int tl_term_init(struct tl_term *t, int cols, int rows)
@@ -55,9 +108,14 @@ int tl_term_init(struct tl_term *t, int cols, int rows)
 	memset(t, 0, sizeof(*t));
 	if (cols < 1 || rows < 1 || cols > TERM_MAX_DIM || rows > TERM_MAX_DIM)
 		return -1;
-	t->cells = malloc((size_t)cols * (size_t)rows * sizeof(*t->cells));
-	if (t->cells == NULL)
+	size_t n = (size_t)cols * (size_t)rows;
+	t->cells = malloc(n * sizeof(*t->cells));
+	t->alt_cells = malloc(n * sizeof(*t->alt_cells));
+	t->dirty_rows = calloc((size_t)rows, sizeof(*t->dirty_rows));
+	if (t->cells == NULL || t->alt_cells == NULL || t->dirty_rows == NULL) {
+		tl_term_free(t);
 		return -1;
+	}
 	t->cols = cols;
 	t->rows = rows;
 	tl_vt_init(&t->vt);
@@ -68,7 +126,39 @@ int tl_term_init(struct tl_term *t, int cols, int rows)
 void tl_term_free(struct tl_term *t)
 {
 	free(t->cells);
+	free(t->alt_cells);
+	free(t->dirty_rows);
 	t->cells = NULL;
+	t->alt_cells = NULL;
+	t->dirty_rows = NULL;
+}
+
+static struct tl_cell *resize_grid(const struct tl_cell *old, int old_cols,
+	int old_rows, int new_cols, int new_rows, int skip)
+{
+	struct tl_cell *cells = malloc((size_t)new_cols * (size_t)new_rows *
+		sizeof(*cells));
+	if (cells == NULL)
+		return NULL;
+	struct tl_cell b = { ' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0 };
+	for (int y = 0; y < new_rows; y++) {
+		for (int x = 0; x < new_cols; x++) {
+			int oy = y + skip;
+			struct tl_cell c = b;
+			if (oy >= 0 && oy < old_rows && x < old_cols)
+				c = old[(size_t)oy * (size_t)old_cols + (size_t)x];
+			/* A wide character cut at the new right edge. */
+			if (x == new_cols - 1 && c.cp != TL_CELL_WIDE_TAIL &&
+			    x + 1 < old_cols && oy >= 0 && oy < old_rows &&
+			    old[(size_t)oy * (size_t)old_cols + (size_t)(x + 1)].cp ==
+				    TL_CELL_WIDE_TAIL) {
+				c.cp = ' ';
+				c.ncomb = 0;
+			}
+			cells[(size_t)y * (size_t)new_cols + (size_t)x] = c;
+		}
+	}
+	return cells;
 }
 
 int tl_term_resize(struct tl_term *t, int cols, int rows)
@@ -77,60 +167,73 @@ int tl_term_resize(struct tl_term *t, int cols, int rows)
 		return -1;
 	if (cols == t->cols && rows == t->rows)
 		return 0;
-	struct tl_cell *cells = malloc((size_t)cols * (size_t)rows *
-		sizeof(*cells));
-	if (cells == NULL)
-		return -1;
 	/* Drop rows from the top when the cursor would fall off. */
 	int skip = t->cy - (rows - 1);
 	if (skip < 0)
 		skip = 0;
-	struct tl_cell b = { ' ', TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0 };
-	for (int y = 0; y < rows; y++) {
-		for (int x = 0; x < cols; x++) {
-			int oy = y + skip;
-			struct tl_cell c = b;
-			if (oy < t->rows && x < t->cols)
-				c = *tl_term_cell(t, x, oy);
-			/* A wide character cut at the new right edge. */
-			if (x == cols - 1 && c.cp != TL_CELL_WIDE_TAIL &&
-			    x + 1 < t->cols && oy < t->rows &&
-			    tl_term_cell(t, x + 1, oy)->cp == TL_CELL_WIDE_TAIL)
-				c.cp = ' ';
-			cells[(size_t)y * (size_t)cols + (size_t)x] = c;
-		}
+	struct tl_cell *cells = resize_grid(t->cells, t->cols, t->rows, cols,
+		rows, skip);
+	struct tl_cell *alt = resize_grid(t->alt_cells, t->cols, t->rows, cols,
+		rows, t->alt_screen ? skip : 0);
+	bool *dirty_rows = calloc((size_t)rows, sizeof(*dirty_rows));
+	if (cells == NULL || alt == NULL || dirty_rows == NULL) {
+		free(cells);
+		free(alt);
+		free(dirty_rows);
+		return -1;
 	}
 	free(t->cells);
+	free(t->alt_cells);
+	free(t->dirty_rows);
 	t->cells = cells;
+	t->alt_cells = alt;
+	t->dirty_rows = dirty_rows;
 	t->cols = cols;
 	t->rows = rows;
 	t->cy -= skip;
+	if (t->cy < 0)
+		t->cy = 0;
 	if (t->cx >= cols)
 		t->cx = cols - 1;
 	t->wrap_next = false;
+	t->scroll_top = 0;
+	t->scroll_bottom = rows - 1;
 	if (t->saved.cx >= cols)
 		t->saved.cx = cols - 1;
 	if (t->saved.cy >= rows)
 		t->saved.cy = rows - 1;
-	t->dirty = true;
+	if (t->alt_saved.cx >= cols)
+		t->alt_saved.cx = cols - 1;
+	if (t->alt_saved.cy >= rows)
+		t->alt_saved.cy = rows - 1;
+	mark_all(t);
 	return 0;
 }
 
-static void scroll_up(struct tl_term *t, int top, int n)
+static void scroll_up(struct tl_term *t, int top, int bot, int n)
 {
-	int count = t->rows - top;
+	if (top < 0)
+		top = 0;
+	if (bot >= t->rows)
+		bot = t->rows - 1;
+	int count = bot - top + 1;
 	if (n > count)
 		n = count;
 	if (n <= 0)
 		return;
 	memmove(tl_term_cell(t, 0, top), tl_term_cell(t, 0, top + n),
 		(size_t)(count - n) * (size_t)t->cols * sizeof(struct tl_cell));
-	fill_rows(t, t->rows - n, t->rows);
+	fill_rows(t, bot - n + 1, bot + 1);
+	mark_rows(t, top, bot + 1);
 }
 
-static void scroll_down(struct tl_term *t, int top, int n)
+static void scroll_down(struct tl_term *t, int top, int bot, int n)
 {
-	int count = t->rows - top;
+	if (top < 0)
+		top = 0;
+	if (bot >= t->rows)
+		bot = t->rows - 1;
+	int count = bot - top + 1;
 	if (n > count)
 		n = count;
 	if (n <= 0)
@@ -138,15 +241,17 @@ static void scroll_down(struct tl_term *t, int top, int n)
 	memmove(tl_term_cell(t, 0, top + n), tl_term_cell(t, 0, top),
 		(size_t)(count - n) * (size_t)t->cols * sizeof(struct tl_cell));
 	fill_rows(t, top, top + n);
+	mark_rows(t, top, bot + 1);
 }
 
 static void linefeed(struct tl_term *t)
 {
-	if (t->cy == t->rows - 1)
-		scroll_up(t, 0, 1);
-	else
+	if (t->cy == t->scroll_bottom)
+		scroll_up(t, t->scroll_top, t->scroll_bottom, 1);
+	else if (t->cy < t->rows - 1)
 		t->cy++;
 	t->wrap_next = false;
+	mark_row(t, t->cy);
 }
 
 static void move_to(struct tl_term *t, int x, int y)
@@ -154,25 +259,93 @@ static void move_to(struct tl_term *t, int x, int y)
 	t->cx = x < 0 ? 0 : x >= t->cols ? t->cols - 1 : x;
 	t->cy = y < 0 ? 0 : y >= t->rows ? t->rows - 1 : y;
 	t->wrap_next = false;
-	t->dirty = true;
+	mark_row(t, t->cy);
+}
+
+static void move_to_origin(struct tl_term *t, int x, int y)
+{
+	if (t->origin_mode) {
+		int min_y = t->scroll_top;
+		int max_y = t->scroll_bottom;
+		y += min_y;
+		if (y < min_y)
+			y = min_y;
+		if (y > max_y)
+			y = max_y;
+	}
+	move_to(t, x, y);
 }
 
 /* Overwriting half of a wide character blanks the other half. */
 static void unwide(struct tl_term *t, int x, int y)
 {
 	struct tl_cell *c = tl_term_cell(t, x, y);
-	if (c->cp == TL_CELL_WIDE_TAIL && x > 0)
-		tl_term_cell(t, x - 1, y)->cp = ' ';
-	if (x + 1 < t->cols && tl_term_cell(t, x + 1, y)->cp == TL_CELL_WIDE_TAIL)
-		tl_term_cell(t, x + 1, y)->cp = ' ';
+	if (c->cp == TL_CELL_WIDE_TAIL && x > 0) {
+		struct tl_cell *head = tl_term_cell(t, x - 1, y);
+		head->cp = ' ';
+		head->ncomb = 0;
+	}
+	if (x + 1 < t->cols && tl_term_cell(t, x + 1, y)->cp == TL_CELL_WIDE_TAIL) {
+		struct tl_cell *tail = tl_term_cell(t, x + 1, y);
+		tail->cp = ' ';
+		tail->ncomb = 0;
+	}
+}
+
+/* Insert or delete n cells at the cursor, within the line. */
+static void shift_cells(struct tl_term *t, int n, bool insert)
+{
+	int x = t->cx, room = t->cols - x;
+	if (n > room)
+		n = room;
+	if (n <= 0)
+		return;
+	struct tl_cell *row = tl_term_cell(t, 0, t->cy);
+	unwide(t, x, t->cy);
+	if (insert) {
+		memmove(row + x + n, row + x, (size_t)(room - n) * sizeof(*row));
+		fill(t, x, t->cy, x + n);
+	} else {
+		memmove(row + x, row + x + n, (size_t)(room - n) * sizeof(*row));
+		fill(t, t->cols - n, t->cy, t->cols);
+	}
+	t->wrap_next = false;
+	mark_row(t, t->cy);
+}
+
+static uint32_t dec_gfx_map(uint32_t cp)
+{
+	static const uint32_t map[32] = {
+		' ',    0x25c6, 0x2592, 0x2409, 0x240c, 0x240d, 0x240a, 0x00b0,
+		0x00b1, 0x2424, 0x240b, 0x2518, 0x2510, 0x250c, 0x2514, 0x253c,
+		0x23ba, 0x23bb, 0x2500, 0x23bc, 0x23bd, 0x251c, 0x2524, 0x2534,
+		0x252c, 0x2502, 0x2264, 0x2265, 0x03c0, 0x2260, 0x00a3, 0x00b7,
+	};
+	return map[cp - 0x5f];
 }
 
 void tl_term_print(struct tl_term *t, uint32_t cp)
 {
+	if (t->dec_gfx && cp >= 0x5f && cp <= 0x7e)
+		cp = dec_gfx_map(cp);
+
 	int w = tam_uni_width(cp);
-	if (w <= 0)
-		return; /* combining marks arrive in 0.0.2 */
-	if (w > t->cols)
+	if (w == 0) {
+		if (cp < 0x20)
+			return;
+		int px = t->wrap_next ? t->cx : (t->cx > 0 ? t->cx - 1 : -1);
+		if (px < 0)
+			return;
+		struct tl_cell *prev = tl_term_cell(t, px, t->cy);
+		if (prev->cp == TL_CELL_WIDE_TAIL && px > 0)
+			prev = tl_term_cell(t, px - 1, t->cy);
+		if (prev->cp != TL_CELL_WIDE_TAIL && prev->ncomb < TL_CELL_COMB_MAX) {
+			prev->comb[prev->ncomb++] = cp;
+			mark_row(t, t->cy);
+		}
+		return;
+	}
+	if (w < 0 || w > t->cols)
 		return;
 	if (t->wrap_next && t->autowrap) {
 		t->cx = 0;
@@ -185,15 +358,17 @@ void tl_term_print(struct tl_term *t, uint32_t cp)
 		t->cx = 0;
 		linefeed(t);
 	}
+	if (t->insert_mode)
+		shift_cells(t, w, true);
 	unwide(t, t->cx, t->cy);
 	struct tl_cell *c = tl_term_cell(t, t->cx, t->cy);
-	*c = (struct tl_cell){ cp, t->pen.fg, t->pen.bg, t->pen.attrs };
+	*c = (struct tl_cell){ cp, { 0, 0 }, t->pen.fg, t->pen.bg, t->pen.attrs, 0 };
 	if (w == 2) {
 		unwide(t, t->cx + 1, t->cy);
 		c[1] = *c;
 		c[1].cp = TL_CELL_WIDE_TAIL;
 	}
-	t->dirty = true;
+	mark_row(t, t->cy);
 	if (t->cx + w >= t->cols) {
 		t->cx = t->cols - 1;
 		t->wrap_next = t->autowrap;
@@ -230,7 +405,7 @@ void tl_term_control(struct tl_term *t, unsigned char c)
 		/* BEL, SO, SI and the rest: nothing yet. */
 		return;
 	}
-	t->dirty = true;
+	mark_row(t, t->cy);
 }
 
 static void reply(struct tl_term *t, const char *s)
@@ -242,21 +417,39 @@ static void reply(struct tl_term *t, const char *s)
 	}
 }
 
+static void save_cursor(struct tl_term *t)
+{
+	t->saved = (struct tl_saved){
+		t->cx, t->cy, t->wrap_next, t->origin_mode, t->dec_gfx, t->pen
+	};
+}
+
+static void restore_cursor(struct tl_term *t)
+{
+	t->origin_mode = t->saved.origin;
+	t->dec_gfx = t->saved.dec_gfx;
+	move_to(t, t->saved.cx, t->saved.cy);
+	t->wrap_next = t->saved.wrap_next;
+	t->pen = t->saved.pen;
+}
+
 void tl_term_esc(struct tl_term *t, char inter, char final)
 {
+	if (inter == '(') {
+		if (final == '0')
+			t->dec_gfx = true;
+		else if (final == 'B')
+			t->dec_gfx = false;
+		return;
+	}
 	if (inter != 0)
-		return; /* character sets: 0.0.2 */
+		return;
 	switch (final) {
 	case '7':
-		t->saved.cx = t->cx;
-		t->saved.cy = t->cy;
-		t->saved.wrap_next = t->wrap_next;
-		t->saved.pen = t->pen;
+		save_cursor(t);
 		break;
 	case '8':
-		move_to(t, t->saved.cx, t->saved.cy);
-		t->wrap_next = t->saved.wrap_next;
-		t->pen = t->saved.pen;
+		restore_cursor(t);
 		break;
 	case 'D':
 		linefeed(t);
@@ -266,11 +459,12 @@ void tl_term_esc(struct tl_term *t, char inter, char final)
 		linefeed(t);
 		break;
 	case 'M':
-		if (t->cy == 0)
-			scroll_down(t, 0, 1);
-		else
+		if (t->cy == t->scroll_top)
+			scroll_down(t, t->scroll_top, t->scroll_bottom, 1);
+		else if (t->cy > 0)
 			t->cy--;
 		t->wrap_next = false;
+		mark_row(t, t->cy);
 		break;
 	case 'c':
 		reset(t);
@@ -284,7 +478,7 @@ void tl_term_esc(struct tl_term *t, char inter, char final)
 	default:
 		return;
 	}
-	t->dirty = true;
+	mark_row(t, t->cy);
 }
 
 static int arg(const struct tl_csi *c, int i, int dflt)
@@ -368,35 +562,71 @@ static void sgr(struct tl_term *t, const struct tl_csi *c)
 	}
 }
 
+static void switch_screen(struct tl_term *t, bool alt, bool clear_alt,
+	bool save_on_enter)
+{
+	if (alt == t->alt_screen) {
+		if (alt && clear_alt) {
+			fill_rows(t, 0, t->rows);
+			mark_all(t);
+		}
+		return;
+	}
+	if (alt && save_on_enter)
+		save_cursor(t);
+
+	struct tl_cell *tmp_cells = t->cells;
+	t->cells = t->alt_cells;
+	t->alt_cells = tmp_cells;
+
+	struct tl_saved tmp_saved = t->saved;
+	t->saved = t->alt_saved;
+	t->alt_saved = tmp_saved;
+
+	t->alt_screen = alt;
+	t->scroll_top = 0;
+	t->scroll_bottom = t->rows - 1;
+	if (alt && clear_alt)
+		fill_rows(t, 0, t->rows);
+	if (!alt && save_on_enter)
+		restore_cursor(t);
+	mark_all(t);
+}
+
 static void dec_mode(struct tl_term *t, const struct tl_csi *c, bool on)
 {
 	for (int i = 0; i < c->n; i++) {
 		switch (c->p[i]) {
 		case 1: t->app_cursor = on; break;
+		case 6:
+			t->origin_mode = on;
+			move_to_origin(t, 0, 0);
+			break;
 		case 7: t->autowrap = on; if (!on) t->wrap_next = false; break;
-		case 25: t->cursor_visible = on; break;
-		default: break; /* 1049 and friends: 0.0.2 */
+		case 25:
+			t->cursor_visible = on;
+			mark_row(t, t->cy);
+			break;
+		case 47:
+			switch_screen(t, on, false, false);
+			break;
+		case 1047:
+			switch_screen(t, on, true, false);
+			break;
+		case 1049:
+			switch_screen(t, on, true, true);
+			break;
+		default: break;
 		}
 	}
-	t->dirty = true;
 }
 
-/* Insert or delete n cells at the cursor, within the line. */
-static void shift_cells(struct tl_term *t, int n, bool insert)
+static void ansi_mode(struct tl_term *t, const struct tl_csi *c, bool on)
 {
-	int x = t->cx, room = t->cols - x;
-	if (n > room)
-		n = room;
-	struct tl_cell *row = tl_term_cell(t, 0, t->cy);
-	unwide(t, x, t->cy);
-	if (insert) {
-		memmove(row + x + n, row + x, (size_t)(room - n) * sizeof(*row));
-		fill(t, x, t->cy, x + n);
-	} else {
-		memmove(row + x, row + x + n, (size_t)(room - n) * sizeof(*row));
-		fill(t, t->cols - n, t->cy, t->cols);
+	for (int i = 0; i < c->n; i++) {
+		if (c->p[i] == 4)
+			t->insert_mode = on;
 	}
-	t->wrap_next = false;
 }
 
 void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
@@ -410,20 +640,49 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 			dec_mode(t, c, false);
 		return;
 	}
-	if (c->priv != 0 || c->inter != 0)
+	if (c->priv != 0)
+		return;
+	if (c->inter == ' ') {
+		if (c->final == 'q') {
+			switch (arg(c, 0, 0)) {
+			case 0: case 1: case 2:
+				t->cursor_style = TL_CURSOR_BLOCK;
+				break;
+			case 3: case 4:
+				t->cursor_style = TL_CURSOR_UNDERLINE;
+				break;
+			case 5: case 6:
+				t->cursor_style = TL_CURSOR_BAR;
+				break;
+			}
+			mark_row(t, t->cy);
+		}
+		return;
+	}
+	if (c->inter != 0)
 		return;
 
 	int n = arg(c, 0, 1);
 	switch (c->final) {
-	case 'A': move_to(t, t->cx, t->cy - n); break;
-	case 'B': move_to(t, t->cx, t->cy + n); break;
+	case 'A': {
+		int top = t->cy >= t->scroll_top ? t->scroll_top : 0;
+		int ny = t->cy - n;
+		move_to(t, t->cx, ny < top ? top : ny);
+		break;
+	}
+	case 'B': {
+		int bot = t->cy <= t->scroll_bottom ? t->scroll_bottom : t->rows - 1;
+		int ny = t->cy + n;
+		move_to(t, t->cx, ny > bot ? bot : ny);
+		break;
+	}
 	case 'C': move_to(t, t->cx + n, t->cy); break;
 	case 'D': move_to(t, t->cx - n, t->cy); break;
 	case 'E': move_to(t, 0, t->cy + n); break;
 	case 'F': move_to(t, 0, t->cy - n); break;
 	case 'G': case '`': move_to(t, n - 1, t->cy); break;
-	case 'd': move_to(t, t->cx, n - 1); break;
-	case 'H': case 'f': move_to(t, arg(c, 1, 1) - 1, n - 1); break;
+	case 'd': move_to_origin(t, t->cx, n - 1); break;
+	case 'H': case 'f': move_to_origin(t, arg(c, 1, 1) - 1, n - 1); break;
 	case 'J':
 		switch (arg(c, 0, 0)) {
 		case 0:
@@ -436,6 +695,7 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 			break;
 		case 2: case 3:
 			fill_rows(t, 0, t->rows);
+			mark_all(t);
 			break;
 		}
 		break;
@@ -453,22 +713,42 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 		fill(t, t->cx, t->cy, t->cx + n);
 		break;
 	case 'L':
-		scroll_down(t, t->cy, n);
-		move_to(t, 0, t->cy);
+		if (t->cy >= t->scroll_top && t->cy <= t->scroll_bottom) {
+			scroll_down(t, t->cy, t->scroll_bottom, n);
+			move_to(t, 0, t->cy);
+		}
 		break;
 	case 'M':
-		scroll_up(t, t->cy, n);
-		move_to(t, 0, t->cy);
+		if (t->cy >= t->scroll_top && t->cy <= t->scroll_bottom) {
+			scroll_up(t, t->cy, t->scroll_bottom, n);
+			move_to(t, 0, t->cy);
+		}
 		break;
-	case 'S': scroll_up(t, 0, n); break;
-	case 'T': scroll_down(t, 0, n); break;
+	case 'S': scroll_up(t, t->scroll_top, t->scroll_bottom, n); break;
+	case 'T': scroll_down(t, t->scroll_top, t->scroll_bottom, n); break;
+	case 'h': ansi_mode(t, c, true); break;
+	case 'l': ansi_mode(t, c, false); break;
+	case 'r': {
+		int top = arg(c, 0, 1) - 1;
+		int bot = arg(c, 1, t->rows) - 1;
+		if (top < 0)
+			top = 0;
+		if (bot >= t->rows)
+			bot = t->rows - 1;
+		if (top < bot) {
+			t->scroll_top = top;
+			t->scroll_bottom = bot;
+			move_to_origin(t, 0, 0);
+		}
+		break;
+	}
 	case 'm': sgr(t, c); break;
 	case 'n':
 		if (arg(c, 0, 0) == 5) {
 			reply(t, "\033[0n");
 		} else if (arg(c, 0, 0) == 6) {
-			snprintf(buf, sizeof(buf), "\033[%d;%dR", t->cy + 1,
-				t->cx + 1);
+			int ry = t->origin_mode ? t->cy - t->scroll_top + 1 : t->cy + 1;
+			snprintf(buf, sizeof(buf), "\033[%d;%dR", ry, t->cx + 1);
 			reply(t, buf);
 		}
 		break;

@@ -20,9 +20,14 @@ uint32_t tl_color_resolve(const struct tl_palette *p, uint32_t color,
 	bool fg);
 
 /* Draw t into a width x height XRGB8888 image with pad pixels of margin.
- * focused draws a filled cursor block, otherwise an outline. */
+ * focused draws the active cursor, otherwise an outline. */
 void tl_render(const struct tl_term *t, struct tl_font *f,
 	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
 	int pad, bool focused);
+
+/* Draw only the rows where rows[y] is true, or everything when full is true. */
+void tl_render_rows(const struct tl_term *t, struct tl_font *f,
+	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
+	int pad, bool focused, const bool *rows, bool full);
 
 #endif

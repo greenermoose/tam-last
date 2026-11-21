@@ -48,8 +48,13 @@ struct app {
 	int lw, lh;
 	int width, height, pad;
 	bool focused;
+	bool prev_focused;
 	bool need_draw;
 	bool closing;
+	int prev_cx, prev_cy;
+	bool *buf_dirty[2];
+	int buf_dirty_rows;
+	bool buf_full[2];
 	int32_t repeat_rate, repeat_delay;
 	uint32_t repeat_code;
 	struct timespec repeat_at;
@@ -96,6 +101,45 @@ static long ms_until(const struct timespec *t)
 	return ms < 0 ? 0 : ms;
 }
 
+static void sync_dirty(struct app *a)
+{
+	int rows = a->term.rows;
+	if (a->buf_dirty_rows != rows) {
+		for (int i = 0; i < 2; i++) {
+			free(a->buf_dirty[i]);
+			a->buf_dirty[i] = calloc((size_t)rows, sizeof(bool));
+			a->buf_full[i] = true;
+		}
+		a->buf_dirty_rows = rows;
+	}
+	if (a->term.full_dirty) {
+		a->buf_full[0] = a->buf_full[1] = true;
+		a->term.full_dirty = false;
+	}
+	for (int y = 0; y < rows; y++) {
+		if (a->term.dirty_rows[y]) {
+			for (int i = 0; i < 2; i++)
+				if (a->buf_dirty[i] != NULL)
+					a->buf_dirty[i][y] = true;
+			a->term.dirty_rows[y] = false;
+		}
+	}
+	if (a->prev_cy != a->term.cy || a->prev_cx != a->term.cx ||
+	    a->prev_focused != a->focused) {
+		for (int i = 0; i < 2; i++) {
+			if (a->buf_dirty[i] == NULL)
+				continue;
+			if (a->prev_cy >= 0 && a->prev_cy < rows)
+				a->buf_dirty[i][a->prev_cy] = true;
+			if (a->term.cy >= 0 && a->term.cy < rows)
+				a->buf_dirty[i][a->term.cy] = true;
+		}
+		a->prev_cx = a->term.cx;
+		a->prev_cy = a->term.cy;
+		a->prev_focused = a->focused;
+	}
+}
+
 static void draw(struct app *a, bool force)
 {
 	if (!a->win.configured)
@@ -104,14 +148,49 @@ static void draw(struct app *a, bool force)
 		a->need_draw = true;
 		return;
 	}
+	sync_dirty(a);
 	struct tl_buffer *b = tl_window_buffer(&a->win, a->width, a->height);
 	if (b == NULL) {
 		a->need_draw = true; /* both busy; try again on release */
 		return;
 	}
-	tl_render(&a->term, &a->font, &a->pal, b->pixels, b->width, b->height,
-		a->pad, a->focused);
-	tl_window_present(&a->win, b, a->lw, a->lh);
+	int idx = (b == &a->win.bufs[1]) ? 1 : 0;
+	bool full = a->buf_full[idx] || a->buf_dirty[idx] == NULL;
+	tl_render_rows(&a->term, &a->font, &a->pal, b->pixels, b->width,
+		b->height, a->pad, a->focused, a->buf_dirty[idx], full);
+
+	struct tl_rect rects[64];
+	size_t nrects = 0;
+	if (!full) {
+		int cw = a->font.cell_w, ch = a->font.cell_h;
+		int y = 0;
+		while (y < a->term.rows) {
+			if (!a->buf_dirty[idx][y]) {
+				y++;
+				continue;
+			}
+			int y0 = y;
+			while (y < a->term.rows && a->buf_dirty[idx][y])
+				y++;
+			if (nrects == sizeof(rects) / sizeof(rects[0])) {
+				nrects = 0; /* too many bands: damage whole buffer */
+				break;
+			}
+			rects[nrects++] = (struct tl_rect){
+				a->pad, a->pad + y0 * ch,
+				a->term.cols * cw, (y - y0) * ch
+			};
+		}
+		if (nrects == 0 && !a->buf_dirty[idx][0]) {
+			/* Nothing changed in this buffer: still commit 1x1 or full?
+			 * Actually if a row was dirty we had nrects > 0; if 0 bands
+			 * because of overflow, nrects == 0 damages full buffer. */
+		}
+	}
+	tl_window_present_damage(&a->win, b, a->lw, a->lh, rects, nrects);
+	a->buf_full[idx] = false;
+	if (a->buf_dirty[idx] != NULL)
+		memset(a->buf_dirty[idx], 0, (size_t)a->buf_dirty_rows * sizeof(bool));
 	a->need_draw = false;
 	a->term.dirty = false;
 }
@@ -199,6 +278,7 @@ static void on_scale(void *ud, uint32_t scale120)
 	tl_font_close(&a->font);
 	a->font = f;
 	layout(a);
+	a->term.full_dirty = true;
 	a->term.dirty = true;
 	draw(a, true);
 }
@@ -475,6 +555,8 @@ int main(int argc, char **argv)
 
 	if (!child_done)
 		kill(-a.pty.pid, SIGHUP);
+	free(a.buf_dirty[0]);
+	free(a.buf_dirty[1]);
 	tl_window_close(&a.win);
 	tl_pty_close(&a.pty);
 	tl_term_free(&a.term);

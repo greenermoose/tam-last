@@ -67,6 +67,21 @@ int main(int argc, char **argv)
 	tl_render(&t, &font, &pal, px, w, h, pad, false);
 	CHECK(px[(pad + 1) * w + pad + 3 * font.cell_w + 1] == pal.bg);
 	CHECK(px[pad * w + pad + 3 * font.cell_w + 1] == pal.cursor);
+
+	/* Underline and bar cursor styles, plus partial row rendering. */
+	feed(&t, "\033[4 q");
+	tl_render(&t, &font, &pal, px, w, h, pad, true);
+	CHECK(px[(pad + font.cell_h - 1) * w + pad + 3 * font.cell_w + 1] == pal.cursor);
+	CHECK(px[cy * w + pad + 3 * font.cell_w + 1] == pal.bg);
+	feed(&t, "\033[6 q");
+	tl_render(&t, &font, &pal, px, w, h, pad, true);
+	CHECK(px[cy * w + pad + 3 * font.cell_w] == pal.cursor);
+
+	/* Partial tl_render_rows: only row 1 drawn, row 0 left as sentinel. */
+	px[pad * w + pad] = 0x123456;
+	bool only_row1[2] = { false, true };
+	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, only_row1, false);
+	CHECK(px[pad * w + pad] == 0x123456);
 	free(px);
 	tl_term_free(&t);
 	tl_font_close(&font);

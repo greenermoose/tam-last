@@ -1,62 +1,41 @@
 WHATNOW
 
-What tam-last is doing now and what comes next. Read this first; revise
+What tamlinux is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-19, with W5
+Updated: 2026-11-21, with W6
 
 
 STATE
 
-  Version 0.0.2 on branch dev, pushed. Fred accepted its text on DP-2
-  (scale 1.25) beside foot (bug B1, verified); FreeType stays out.
+  Version 0.0.3 on branch dev (uncommitted working tree, ready for Fred's
+  trial). Full-screen program support is implemented and verified against
+  the automated checks:
+  - Scroll regions (DECSTBM), origin mode (DECOM), insert mode (IRM).
+  - Alternate screen (47, 1047, 1049) with a second grid and its own
+    saved cursor; tl_term_resize handles both grids.
+  - DEC special graphics (ESC ( 0 / ESC ( B), combining characters stored
+    with their base cell, and cursor styles (DECSCUSR: block, underline,
+    bar).
+  - Per-buffer row damage tracking with coalesced wl_surface_damage_buffer
+    rectangles.
 
-  What works: our own Wayland client, TrueType rasterizer with vertical
-  grid fitting, fractional scaling, US keymap, legacy xterm key
-  encoding, a shell on a pty, cursor movement, erasing, insert and
-  delete, colors and attributes, wide characters. readelf -d lists only
-  libc and libm. make test and make sanitize pass.
-
-  Recent: W1 built 0.0.1; W2 published to GitHub; W3 wrote the docs and
-  fixed B1 (0.0.2); W4 set up this file.
-
-  Follows the tam-idol 0.2.0 standard (W5, 2026-11-19). That change
-  touched READMEs and records only; no code changed, so VERSION stays
-  0.0.2.
+  make clean && make, make test (with libtam include path), ASan/UBSan
+  sanitize tests, headless tam-pane check, and readelf -d (libc and libm
+  only) all pass.
 
 
 NEXT
 
-  1. 0.0.3, full-screen programs (plans/P1-foundation.md has the list
-     and the acceptance checks). Set VERSION to 0.0.3 in the first code
-     commit; make test checks tam-last --version.
-
-  2. Scroll regions (DECSTBM) touch every scroll in src/term.c:
-     linefeed, ESC M, IL and DL (CSI L, M) and SU and SD (CSI S, T) call
-     scroll_up and scroll_down with the whole screen as the region.
-     Give those two a bottom margin as well as a top, and route every
-     caller through the region. Add origin mode and IRM with it.
-
-  3. The alternate screen (47, 1047, 1049) needs a second grid and its
-     own saved cursor. tl_term_resize must handle both grids.
-
-  4. DEC special graphics (ESC ( 0), combining characters stored with
-     their base cell, and cursor styles (DECSCUSR, no blinking unless
-     asked).
-
-  5. Damage tracking: every frame redraws everything today (render.c,
-     draw() in main.c). Track dirty rows in tl_term, draw and damage
-     only those, and keep the full redraw for resizes and scale
-     changes. Damage is in buffer pixels (damage_buffer). The two
-     buffers alternate, so keep damage per buffer.
-
-  Done when: the P1 acceptance checks pass, and Fred has run vim, htop,
-  less and yazi in it.
+  1. Fred tries vim, htop, less and yazi in build/tam-last (or installed
+     via make install) on DP-2 (scale 1.25) to accept 0.0.3.
+  2. Next milestone: 0.0.4 (scrollback, pointer/wheel, selection,
+     clipboard/primary selection, bracketed paste, mouse reporting).
 
 
 WAITING FOR FRED
 
-  - Nothing for 0.0.2. For 0.0.3: trying the full-screen programs.
+  - Trying vim, htop, less and yazi in tam-last 0.0.3.
   - Open points in the plans: TERM (P1); where layouts live and kitty
     decoding in libtam (P2).
 

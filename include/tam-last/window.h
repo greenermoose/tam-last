@@ -61,11 +61,17 @@ int tl_window_flush(struct tl_window *win);
 /* A free buffer of this size, or NULL when both are still busy. */
 struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
 	int height);
+struct tl_rect {
+	int x, y, w, h;
+};
+
 /* Attach, damage all, ask for a frame callback, commit. With fractional
  * scaling, the buffer is in device pixels and is shown at the window's
  * size in logical pixels, width x height; otherwise those are ignored. */
 void tl_window_present(struct tl_window *win, struct tl_buffer *b,
 	int width, int height);
+void tl_window_present_damage(struct tl_window *win, struct tl_buffer *b,
+	int width, int height, const struct tl_rect *rects, size_t nrects);
 /* True when the window can draw at a fractional scale. */
 bool tl_window_can_scale(const struct tl_window *win);
 bool tl_window_frame_pending(const struct tl_window *win);

@@ -173,6 +173,84 @@ int main(void)
 	CHECK(tl_term_resize(&t, 30, 12) == 0);
 	CHECK(strcmp(row(3), "keep") == 0 && t.cols == 30);
 
+	/* Scroll regions (DECSTBM), origin mode (DECOM), insert mode (IRM). */
+	fresh(10, 5);
+	feed("r1\r\nr2\r\nr3\r\nr4\r\nr5");
+	feed("\033[2;4r"); /* region: rows 2..4 (1-based) -> 1..3 (0-based) */
+	CHECK(t.cx == 0 && t.cy == 0 && t.scroll_top == 1 && t.scroll_bottom == 3);
+	feed("\033[4;1H\n"); /* at bottom of region: scrolls 1..3 */
+	CHECK(strcmp(row(0), "r1") == 0 && strcmp(row(1), "r3") == 0 &&
+		strcmp(row(2), "r4") == 0 && strcmp(row(3), "") == 0 &&
+		strcmp(row(4), "r5") == 0);
+	feed("\033[2;1H\033M"); /* RI at top of region: scrolls down 1..3 */
+	CHECK(strcmp(row(1), "") == 0 && strcmp(row(2), "r3") == 0 &&
+		strcmp(row(3), "r4") == 0);
+	feed("\033[2;1H\033[S\033[T"); /* SU and SD stay inside region */
+	CHECK(strcmp(row(0), "r1") == 0 && strcmp(row(4), "r5") == 0);
+	feed("\033[3;1H\033[L"); /* IL inside region */
+	CHECK(strcmp(row(3), "r3") == 0 && strcmp(row(4), "r5") == 0);
+	feed("\033[1;1H\033[L"); /* IL outside region: no-op */
+	CHECK(strcmp(row(0), "r1") == 0);
+	feed("\033[?6h"); /* DECOM on: homes to scroll_top */
+	CHECK(t.origin_mode && t.cy == 1);
+	feed("\033[1;1HX\033[99;1HY"); /* clamped to [scroll_top, scroll_bottom] */
+	CHECK(tl_term_cell(&t, 0, 1)->cp == 'X' &&
+		tl_term_cell(&t, 0, 3)->cp == 'Y');
+	feed("\033[?6l");
+	CHECK(!t.origin_mode && t.cy == 0);
+	feed("\033[1;1Habc\033[1;2H\033[4hZ\033[4l"); /* IRM */
+	CHECK(tl_term_cell(&t, 0, 0)->cp == 'a' &&
+		tl_term_cell(&t, 1, 0)->cp == 'Z' &&
+		tl_term_cell(&t, 2, 0)->cp == 'b' &&
+		tl_term_cell(&t, 3, 0)->cp == 'c');
+
+	/* Alternate screen (47, 1047, 1049) and resize of both grids. */
+	fresh(10, 4);
+	feed("main\033[2;3H");
+	feed("\033[?1049h");
+	CHECK(t.alt_screen && strcmp(row(0), "") == 0);
+	feed("\033[1;1Halt");
+	CHECK(tl_term_resize(&t, 12, 5) == 0);
+	CHECK(strcmp(row(0), "alt") == 0);
+	feed("\033[?1049l");
+	CHECK(!t.alt_screen && strcmp(row(0), "main") == 0 &&
+		t.cx == 2 && t.cy == 1);
+	feed("\033[?47h");
+	CHECK(t.alt_screen && strcmp(row(0), "alt") == 0);
+	feed("\033[?1047l");
+	CHECK(!t.alt_screen && strcmp(row(0), "main") == 0);
+
+	/* DEC special graphics (ESC ( 0 / ESC ( B). */
+	fresh(10, 2);
+	feed("\033(0lqk\033(Babc");
+	CHECK(tl_term_cell(&t, 0, 0)->cp == 0x250c &&
+		tl_term_cell(&t, 1, 0)->cp == 0x2500 &&
+		tl_term_cell(&t, 2, 0)->cp == 0x2510 &&
+		tl_term_cell(&t, 3, 0)->cp == 'a');
+
+	/* Combining characters stored with their base cell. */
+	fresh(10, 2);
+	feed("e\xcc\x81\xcc\x82\xcc\x83"); /* e + 3 combining marks; cap is 2 */
+	CHECK(tl_term_cell(&t, 0, 0)->cp == 'e' &&
+		tl_term_cell(&t, 0, 0)->ncomb == 2 &&
+		tl_term_cell(&t, 0, 0)->comb[0] == 0x0301 &&
+		tl_term_cell(&t, 0, 0)->comb[1] == 0x0302);
+
+	/* Cursor styles (DECSCUSR). */
+	feed("\033[4 q");
+	CHECK(t.cursor_style == TL_CURSOR_UNDERLINE);
+	feed("\033[5 q");
+	CHECK(t.cursor_style == TL_CURSOR_BAR);
+	feed("\033[0 q");
+	CHECK(t.cursor_style == TL_CURSOR_BLOCK);
+
+	/* Row dirty tracking. */
+	memset(t.dirty_rows, 0, (size_t)t.rows * sizeof(bool));
+	t.full_dirty = false;
+	t.dirty = false;
+	feed("\033[2;1Hx");
+	CHECK(t.dirty && !t.full_dirty && !t.dirty_rows[0] && t.dirty_rows[1]);
+
 	/* Garbage never breaks the invariants. */
 	srand(1);
 	unsigned char junk[4096];

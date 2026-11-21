@@ -399,8 +399,8 @@ bool tl_window_can_scale(const struct tl_window *win)
 	return win->viewport != 0 && win->fractional != 0;
 }
 
-void tl_window_present(struct tl_window *win, struct tl_buffer *b,
-	int width, int height)
+void tl_window_present_damage(struct tl_window *win, struct tl_buffer *b,
+	int width, int height, const struct tl_rect *rects, size_t nrects)
 {
 	struct tl_wire *w = &win->wire;
 	if (win->viewport != 0 && (width != win->dest_w || height != win->dest_h)) {
@@ -409,11 +409,23 @@ void tl_window_present(struct tl_window *win, struct tl_buffer *b,
 		win->dest_h = height;
 	}
 	tl_surface_attach(w, win->surface, b->id);
-	tl_surface_damage_buffer(w, win->surface, 0, 0, b->width, b->height);
+	if (nrects == 0) {
+		tl_surface_damage_buffer(w, win->surface, 0, 0, b->width, b->height);
+	} else {
+		for (size_t i = 0; i < nrects; i++)
+			tl_surface_damage_buffer(w, win->surface, rects[i].x,
+				rects[i].y, rects[i].w, rects[i].h);
+	}
 	if (win->frame_cb == 0)
 		win->frame_cb = tl_surface_frame(w, win->surface, win);
 	tl_surface_commit(w, win->surface);
 	b->busy = true;
+}
+
+void tl_window_present(struct tl_window *win, struct tl_buffer *b,
+	int width, int height)
+{
+	tl_window_present_damage(win, b, width, height, NULL, 0);
 }
 
 bool tl_window_frame_pending(const struct tl_window *win)

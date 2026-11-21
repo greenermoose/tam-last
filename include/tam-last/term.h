@@ -27,13 +27,22 @@ enum {
 	TL_ATTR_STRIKE = 1 << 7
 };
 
+enum tl_cursor_style {
+	TL_CURSOR_BLOCK = 0,
+	TL_CURSOR_UNDERLINE,
+	TL_CURSOR_BAR
+};
+
 /* The right half of a wide character. */
 #define TL_CELL_WIDE_TAIL 0xFFFFFFFFu
+#define TL_CELL_COMB_MAX 2
 
 struct tl_cell {
 	uint32_t cp; /* ' ' when blank */
+	uint32_t comb[TL_CELL_COMB_MAX];
 	uint32_t fg, bg;
 	uint16_t attrs;
+	uint8_t ncomb;
 };
 
 struct tl_pen {
@@ -41,22 +50,36 @@ struct tl_pen {
 	uint16_t attrs;
 };
 
+struct tl_saved {
+	int cx, cy;
+	bool wrap_next;
+	bool origin;
+	bool dec_gfx;
+	struct tl_pen pen;
+};
+
 struct tl_term {
 	int cols, rows;
 	struct tl_cell *cells;
+	struct tl_cell *alt_cells;
+	bool alt_screen;
 	int cx, cy;
+	int scroll_top, scroll_bottom;
 	bool wrap_next; /* the last column was written; wrap before the next */
+	bool origin_mode;
+	bool insert_mode;
+	bool dec_gfx;
+	enum tl_cursor_style cursor_style;
 	struct tl_pen pen;
-	struct {
-		int cx, cy;
-		bool wrap_next;
-		struct tl_pen pen;
-	} saved;
+	struct tl_saved saved;
+	struct tl_saved alt_saved;
 	bool cursor_visible;
 	bool autowrap;
 	bool app_cursor; /* DECCKM: cursor keys send SS3 */
 	bool app_keypad; /* DECKPAM */
 	bool dirty;
+	bool full_dirty;
+	bool *dirty_rows;
 	/* Answers to queries (DSR, DA), for the caller to write to the pty. */
 	unsigned char reply[256];
 	size_t reply_len;
