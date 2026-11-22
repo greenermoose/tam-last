@@ -9,6 +9,7 @@ GUIDANCE
 
   Fred: "/plan Do the next work slice of tam-last."
   Fred: "Approved. Proceed."
+  Fred: "Create a sandbox with demos for me to play with in tam-last."
 
 
 DONE
@@ -32,6 +33,10 @@ DONE
   - Verified make clean && make (zero warnings), make test, make
     sanitize (ASan/UBSan, including headless tam-pane), and readelf -d
     (libc.so.6 and libm.so.6 only).
+  - Added sandbox/ following tam-idol 1.1.0 (sandbox/README-sandbox,
+    play menu, demo-looks, demo-colors, demo-scrollback, demo-mouse,
+    demo-fullscreen, demo-config, and theme-gruvbox.ini). Verified with
+    sh -n, --in-term dry runs, and tam-idol/tools/idol-check.
 
 
 FAILED

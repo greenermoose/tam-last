@@ -1,0 +1,55 @@
+#!/bin/sh
+# Interactive demo menu for tam-last.
+# Run ./sandbox/play from any terminal to launch build/tam-last with the menu,
+# or ./sandbox/play --in-term to run inside the current terminal.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	want=$(tr -d '[:space:]' < "$ROOT/VERSION")
+	have=$("$ROOT/build/tam-last" --version 2>/dev/null | awk '{print $2}') || true
+	if [ "$have" != "$want" ]; then
+		echo "build/tam-last is '${have:-missing}', VERSION is $want: run make first" >&2
+		exit 1
+	fi
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+while :; do
+	printf '\033[2J\033[H'
+	printf '\033[1;36m╔══════════════════════════════════════════════════════╗\033[0m\n'
+	printf '\033[1;36m║\033[0m  \033[1mtam-last sandbox\033[0m  (built version: \033[33m%s\033[0m)           \033[1;36m║\033[0m\n' \
+		"$(tr -d '[:space:]' < "$ROOT/VERSION")"
+	printf '\033[1;36m╚══════════════════════════════════════════════════════╝\033[0m\n\n'
+	printf '  \033[1;32m1\033[0m  Looks (0.0.5)       bold/italic, box drawing, blocks, Braille, fallback\n'
+	printf '  \033[1;32m2\033[0m  Colors              16-color, 256-color cube, and 24-bit RGB gradients\n'
+	printf '  \033[1;32m3\033[0m  Scrollback & Paste  250 lines, wheel/Shift+PgUp, select, copy, paste\n'
+	printf '  \033[1;32m4\033[0m  Mouse Canvas        interactive SGR 1006 paint grid + Shift bypass\n'
+	printf '  \033[1;32m5\033[0m  Full-Screen (0.0.3) alt screen, scroll region, cursor styles, DEC gfx\n'
+	printf '  \033[1;32m6\033[0m  Gruvbox Config      open a new window with sandbox/theme-gruvbox.ini\n'
+	printf '  \033[1;32ms\033[0m  Shell               drop into %s inside this tam-last window\n' "${SHELL:-/bin/sh}"
+	printf '  \033[1;32mq\033[0m  Quit\n\n'
+	printf 'Choose [1-6, s, q]: '
+
+	old=$(stty -g 2>/dev/null || true)
+	if [ -n "$old" ]; then
+		stty raw -echo
+		ch=$(dd bs=1 count=1 2>/dev/null || true)
+		stty "$old"
+		printf '%s\n' "$ch"
+	else
+		IFS= read -r ch || break
+	fi
+
+	case "$ch" in
+	1) "$DIR/demo-looks" --in-term ;;
+	2) "$DIR/demo-colors" --in-term ;;
+	3) "$DIR/demo-scrollback" --in-term ;;
+	4) "$DIR/demo-mouse" --in-term ;;
+	5) "$DIR/demo-fullscreen" --in-term ;;
+	6) "$DIR/demo-config" & ;;
+	s | S) "${SHELL:-/bin/sh}" ;;
+	q | Q | '') break ;;
+	esac
+done

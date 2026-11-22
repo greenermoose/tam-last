@@ -1,0 +1,94 @@
+#!/bin/sh
+# Showcase tam-last 0.0.4: interactive SGR 1006 mouse reporting paint canvas.
+#   - Left-click / drag: paint cells
+#   - Right-click / drag: erase cells
+#   - Scroll wheel: cycle brush color
+#   - Hold Shift + drag: bypass mouse reporting for normal text selection
+#   - Press 'c' to clear, 'q' to quit
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+python3 - <<'PY'
+import os, re, sys, termios, tty
+
+COLORS = [
+    ("red", 196), ("orange", 208), ("yellow", 220),
+    ("green", 82), ("cyan", 51), ("blue", 39), ("magenta", 201), ("white", 15),
+]
+SGR_RE = re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
+
+fd = sys.stdin.fileno()
+old = termios.tcgetattr(fd)
+color_idx = 4
+painting = 0  # 0=none, 1=paint, 2=erase
+
+def draw_header(last_ev="ready"):
+    name, code = COLORS[color_idx]
+    sys.stdout.write(
+        f"\033[1;1H\033[2K\033[1;36mtam-last mouse canvas\033[0m  "
+        f"brush: \033[48;5;{code}m  \033[0m {name:<7s}  "
+        f"| L-drag: paint  R-drag: erase  Wheel: color  Shift: select  c: clear  q: quit"
+        f"\033[2;1H\033[2K\033[2mlast event: {last_ev}\033[0m"
+    )
+    sys.stdout.flush()
+
+try:
+    tty.setraw(fd)
+    # Alt screen + hide cursor + DECSET 1000/1002/1006
+    sys.stdout.write("\033[?1049h\033[?25l\033[2J\033[?1000h\033[?1002h\033[?1006h")
+    draw_header()
+    buf = ""
+    while True:
+        chunk = os.read(fd, 256).decode("latin1", errors="ignore")
+        if not chunk:
+            break
+        buf += chunk
+        while buf:
+            if buf[0] == "\x1b":
+                m = SGR_RE.match(buf)
+                if m:
+                    cb, cx, cy, kind = int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)
+                    buf = buf[m.end():]
+                    btn = cb & 3
+                    motion = (cb & 32) != 0
+                    wheel = (cb & 64) != 0
+                    if wheel:
+                        color_idx = (color_idx + (-1 if btn == 0 else 1)) % len(COLORS)
+                        draw_header(f"wheel {'up' if btn == 0 else 'down'} at ({cx},{cy})")
+                    elif kind == "m":
+                        painting = 0
+                        draw_header(f"release btn={btn} at ({cx},{cy})")
+                    else:
+                        if not motion:
+                            painting = 1 if btn == 0 else (2 if btn == 2 else 0)
+                        if cy >= 3 and painting != 0:
+                            if painting == 1:
+                                code = COLORS[color_idx][1]
+                                sys.stdout.write(f"\033[{cy};{cx}H\033[48;5;{code}m \033[0m")
+                            else:
+                                sys.stdout.write(f"\033[{cy};{cx}H ")
+                        draw_header(f"{'drag' if motion else 'press'} btn={btn} at ({cx},{cy})")
+                    continue
+                if len(buf) < 20 and (len(buf) == 1 or buf.startswith("\x1b[")):
+                    break  # wait for rest of sequence
+                buf = buf[1:]
+                continue
+            ch = buf[0]
+            buf = buf[1:]
+            if ch in ("q", "Q", "\x03"):
+                raise SystemExit(0)
+            if ch in ("c", "C"):
+                sys.stdout.write("\033[2J")
+                draw_header("cleared")
+except SystemExit:
+    pass
+finally:
+    sys.stdout.write("\033[?1006l\033[?1002l\033[?1000l\033[?25h\033[?1049l")
+    sys.stdout.flush()
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+PY

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Showcase tam-last 0.0.5 configuration (-c / tam_ini) using the throwaway
+# Gruvbox Dark theme in sandbox/theme-gruvbox.ini (11 pt, 12 px padding).
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+want=$(tr -d '[:space:]' < "$ROOT/VERSION")
+have=$("$ROOT/build/tam-last" --version 2>/dev/null | awk '{print $2}') || true
+if [ "$have" != "$want" ]; then
+	echo "build/tam-last is '${have:-missing}', VERSION is $want: run make first" >&2
+	exit 1
+fi
+
+exec "$ROOT/build/tam-last" -c "$DIR/theme-gruvbox.ini" -e "$DIR/demo-looks" --in-term

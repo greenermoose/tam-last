@@ -1,0 +1,63 @@
+#!/bin/sh
+# Showcase tam-last 0.0.5 ("looks"):
+#   - Bold, italic, bold-italic sibling faces, dim, underline, strikethrough
+#   - Procedural Box Drawing (single, heavy, double, mixed, dashed, arcs, diag)
+#   - Procedural Block Elements (eighths, shades, quadrants)
+#   - Procedural Braille Patterns (dot matrix and sine wave)
+#   - TrueType fallback glyphs
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+python3 - <<'PY'
+import math, sys
+
+out = sys.stdout.write
+out("\033[2J\033[H")
+out("\033[1;36m=== tam-last 0.0.5: Looks (faces, box drawing, blocks, Braille, fallback) ===\033[0m\n\n")
+
+out("\033[1m1. Typography & Attributes\033[0m\n")
+out("   Regular:      The quick brown fox jumps over the lazy dog 0123456789\n")
+out("   Bold:         \033[1mThe quick brown fox jumps over the lazy dog 0123456789\033[0m\n")
+out("   Italic:       \033[3mThe quick brown fox jumps over the lazy dog 0123456789\033[0m\n")
+out("   Bold+Italic:  \033[1;3mThe quick brown fox jumps over the lazy dog 0123456789\033[0m\n")
+out("   Effects:      \033[2mdim\033[0m  \033[4munderline\033[0m  \033[9mstrikethrough\033[0m  \033[7minverse\033[0m  \033[1;4;33mbold+under+yellow\033[0m\n\n")
+
+out("\033[1m2. Procedural Box Drawing (U+2500..U+257F)\033[0m\n")
+out("   ┌───┬───┐  ┏━━━┳━━━┓  ╔═══╦═══╗  ╭───────╮  ╒═══╤═══╕  ┌┄┄┄┄┄┐\n")
+out("   │ A │ B │  ┃ C ┃ D ┃  ║ E ║ F ║  │ ╱╲╱╲╱ │  │ G │ H │  ┆ 2-3 ┆\n")
+out("   ├───┼───┤  ┣━━━╋━━━┫  ╠═══╬═══╣  │ ╲╳╳╳╲ │  ╞═══╪═══╡  ┆ 4-d ┆\n")
+out("   │ 1 │ 2 │  ┃ 3 ┃ 4 ┃  ║ 5 ║ 6 ║  │ ╱╲╱╲╱ │  │ I │ J │  └┈┈┈┈┈┘\n")
+out("   └───┴───┘  ┗━━━┻━━━┛  ╚═══╩═══╝  ╰───────╯  ╘═══╧═══╛   ╶─╸ ╵│╻\n\n")
+
+out("\033[1m3. Procedural Block Elements (U+2580..U+259F)\033[0m\n")
+out("   Lower eighths: \033[32m▁▂▃▄▅▆▇█\033[0m   Left eighths: \033[34m█▉▊▋▌▍▎▏\033[0m   Halves: \033[35m▀▄▌▐█\033[0m\n")
+out("   Shades:        \033[36m░░▒▒▓▓██▓▓▒▒░░\033[0m   Quadrants: \033[33m▖▗▘▙▚▛▜▝▞▟\033[0m\n\n")
+
+out("\033[1m4. Procedural Braille Sine Wave (U+2800..U+28FF)\033[0m\n")
+cols, rows = 60, 4
+bits = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]]
+grid = [[0] * cols for _ in range(rows)]
+w_dots, h_dots = cols * 2, rows * 4
+for x in range(w_dots):
+    y = int(round((math.sin(x * 2 * math.pi / 36.0) * 0.45 + 0.5) * (h_dots - 1)))
+    grid[y // 4][x // 2] |= bits[y % 4][x % 2]
+out("   ┌" + "─" * cols + "┐\n")
+for r in range(rows):
+    line = "".join(chr(0x2800 + m) for m in grid[r])
+    out(f"   │\033[38;5;81m{line}\033[0m│\n")
+out("   └" + "─" * cols + "┘\n\n")
+
+out("\033[1m5. Unicode & Fallback Symbols\033[0m\n")
+out("   Latin/Greek: café naïve résumé λ π Ω Σ ≠ ≤ ≥ → ← ↑ ↓ ↔\n")
+out("   Symbols:     ★ ☆ ♠ ♣ ♥ ♦ ☀ ☁ ☂ ☃ ✓ ✗ ⚠ ⚙ ✦ ✧ ❖\n")
+out("   Nerd/Mono:   il1| O0 {}[]() <>=! -> ~`'\" @#$%^&*\n")
+sys.stdout.flush()
+PY
+
+printf '\nPress Enter to return...'
+IFS= read -r _ || true

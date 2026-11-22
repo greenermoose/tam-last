@@ -1,0 +1,61 @@
+#!/bin/sh
+# Showcase 16-color, 256-color, and 24-bit truecolor rendering in tam-last.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+python3 - <<'PY'
+import sys
+
+out = sys.stdout.write
+out("\033[2J\033[H")
+out("\033[1;36m=== tam-last: 16, 256, and 24-bit Truecolor ===\033[0m\n\n")
+
+out("\033[1m1. 16-Color Palette (regular 0..7, bright 8..15)\033[0m\n   ")
+for i in range(8):
+    out(f"\033[48;5;{i}m  {i:2d}  \033[0m")
+out("\n   ")
+for i in range(8, 16):
+    out(f"\033[48;5;{i}m\033[30m  {i:2d}  \033[0m")
+out("\n\n")
+
+out("\033[1m2. 256-Color 6x6x6 Cube (16..231)\033[0m\n")
+for g in range(6):
+    out("   ")
+    for r in range(6):
+        for b in range(6):
+            idx = 16 + 36 * r + 6 * g + b
+            out(f"\033[48;5;{idx}m \033[0m")
+        out(" ")
+    out("\n")
+
+out("\n\033[1m3. Grayscale Ramp (232..255)\033[0m\n   ")
+for i in range(232, 256):
+    out(f"\033[48;5;{i}m  \033[0m")
+out("\n\n")
+
+out("\033[1m4. 24-Bit Direct RGB Gradients\033[0m\n")
+for label, fn in [
+    ("R ", lambda t: (int(255 * t), 40, 60)),
+    ("G ", lambda t: (40, int(255 * t), 80)),
+    ("B ", lambda t: (50, 80, int(255 * t))),
+    ("🌈", lambda t: (
+        int(127.5 * (1 + __import__("math").sin(t * 6.283))),
+        int(127.5 * (1 + __import__("math").sin(t * 6.283 + 2.094))),
+        int(127.5 * (1 + __import__("math").sin(t * 6.283 + 4.188))),
+    )),
+]:
+    out(f"   {label} ")
+    for x in range(64):
+        r, g, b = fn(x / 63.0)
+        out(f"\033[48;2;{r};{g};{b}m \033[0m")
+    out("\033[0m\n")
+sys.stdout.flush()
+PY
+
+printf '\nPress Enter to return...'
+IFS= read -r _ || true

@@ -1,0 +1,64 @@
+#!/bin/sh
+# Showcase tam-last 0.0.3: alternate screen, scroll regions (DECSTBM),
+# cursor styles (DECSCUSR), DEC special graphics (ESC ( 0), and combining marks.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+python3 - <<'PY'
+import os, sys, termios, tty
+
+fd = sys.stdin.fileno()
+old = termios.tcgetattr(fd)
+out = sys.stdout.write
+
+def draw_frame(style_name, style_code):
+    out(f"\033[?1049h\033[2J\033[H")
+    out("\033[1;36m=== tam-last 0.0.3: Full-Screen, Scroll Region, Cursor Styles & DEC Gfx ===\033[0m\n")
+    out("  Keys: [1] Block cursor   [2] Underline cursor   [3] Bar cursor   [s] Scroll region   [q] Quit\n")
+    out("  DEC Special Graphics (ESC ( 0): \033(0lqqqqwqqqqk  x a ` f g ~ x  mqqqqvqqqqj\033(B\n")
+    out("  Combining marks: e\u0301  a\u0308  n\u0303  o\u0302\u0323  Z\u030a\n")
+    out("  \033[33m──── Scroll region (rows 7..14) stays bounded; header & footer stay fixed ────\033[0m\n")
+    out("\033[16;1H\033[33m  ──── Footer (row 16): current cursor style = "
+        f"\033[1m{style_name}\033[0;33m ────\033[0m")
+    out("\033[7;14r")  # DECSTBM rows 7..14
+    out("\033[7;1H")
+    for i in range(1, 9):
+        out(f"   scroll-region line {i}\r\n" if i < 8 else f"   scroll-region line {i}")
+    out(f"\033[{style_code} q")
+    sys.stdout.flush()
+
+try:
+    tty.setraw(fd)
+    style_name, style_code = "block", 2
+    draw_frame(style_name, style_code)
+    n = 9
+    while True:
+        ch = os.read(fd, 1).decode("latin1", errors="ignore")
+        if ch in ("q", "Q", "\x03"):
+            break
+        elif ch == "1":
+            style_name, style_code = "block", 2
+            out(f"\033[16;48H\033[1;33m{style_name:<10s}\033[0m\033[14;26H\033[{style_code} q")
+            sys.stdout.flush()
+        elif ch == "2":
+            style_name, style_code = "underline", 4
+            out(f"\033[16;48H\033[1;33m{style_name:<10s}\033[0m\033[14;26H\033[{style_code} q")
+            sys.stdout.flush()
+        elif ch == "3":
+            style_name, style_code = "bar", 6
+            out(f"\033[16;48H\033[1;33m{style_name:<10s}\033[0m\033[14;26H\033[{style_code} q")
+            sys.stdout.flush()
+        elif ch in ("s", "S", "\r", " "):
+            out(f"\033[14;1H\r\n   scroll-region line {n} (header/footer untouched!)")
+            n += 1
+            sys.stdout.flush()
+finally:
+    out("\033[r\033[0 q\033[?1049l")
+    sys.stdout.flush()
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+PY

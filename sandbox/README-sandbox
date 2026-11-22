@@ -1,0 +1,38 @@
+SANDBOX
+
+This folder holds test files, demos, and small experiments for trying
+this repository's project out by hand. It is for playing with the
+program, separate from automated tests (tests/) and developer helpers
+(tools/).
+
+
+WHAT GOES HERE
+
+  Sample input files, interactive demo scripts, and throwaway configs
+  that let someone exercise the program and see how it behaves. Nothing
+  here is installed by make install, and make test does not rely on it.
+
+
+IN THIS REPOSITORY
+
+  Interactive demos and throwaway configs for playing with tam-last by
+  hand without touching ~/.config/tam-last/tam-last.ini. Run any demo
+  directly from the repository root (it launches build/tam-last), or
+  start with the menu:
+
+    ./sandbox/play             interactive menu of all demos
+    ./sandbox/demo-looks       0.0.5: bold/italic, box drawing, blocks,
+                               Braille wave, and fallback symbols
+    ./sandbox/demo-colors      16-color, 256-color, and 24-bit gradients
+    ./sandbox/demo-scrollback  0.0.4: 250 lines for wheel, Shift+PgUp,
+                               selection, clipboard, and bracketed paste
+    ./sandbox/demo-mouse       0.0.4: interactive SGR mouse paint canvas
+                               (wheel changes color, Shift bypasses)
+    ./sandbox/demo-fullscreen  0.0.3: alt screen, scroll region, cursor
+                               styles, DEC line-drawing, combining marks
+    ./sandbox/demo-config      0.0.5: launches tam-last with the
+                               throwaway sandbox/theme-gruvbox.ini
+    sandbox/theme-gruvbox.ini  sample tam_ini config (Gruvbox, 11 pt)
+
+  Pass --in-term to any demo script to run it in the current terminal
+  instead of spawning a new build/tam-last window.

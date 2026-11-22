@@ -1,0 +1,44 @@
+#!/bin/sh
+# Showcase tam-last 0.0.4: scrollback, text selection, clipboard/primary,
+# and bracketed paste (DECSET 2004).
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+python3 - <<'PY'
+import sys
+
+out = sys.stdout.write
+out("\033[2J\033[H")
+for i in range(1, 251):
+    col = 31 + (i % 6)
+    out(f"\033[{col}m[{i:03d}]\033[0m  word_{i}  /home/fred/Code/tamlinux/tam-last/src/main.c  "
+        f"\033[1mbold-{i}\033[0m  \033[3mitalic-{i}\033[0m  ──┼──\n")
+
+out("\n\033[1;36m=== tam-last 0.0.4: Scrollback, Selection & Bracketed Paste ===\033[0m\n")
+out("  • Scroll up/down: mouse wheel or Shift+PgUp / Shift+PgDn\n")
+out("  • Select text:    drag (char), double-click (word), triple-click (line)\n")
+out("  • Copy / Paste:   Ctrl+Shift+C / Ctrl+Shift+V, or middle-click / Shift+Insert\n")
+out("  • Bracketed paste (DECSET 2004) is ON below — paste something and press Enter!\n")
+out("  • Type 'q' + Enter (or empty Enter) to return.\n\n")
+sys.stdout.flush()
+PY
+
+# Enable bracketed paste so pasted chunks show the ESC[200~ ... ESC[201~ markers.
+printf '\033[?2004h'
+trap 'printf "\033[?2004l"' EXIT INT TERM
+
+while :; do
+	printf 'paste> '
+	IFS= read -r line || break
+	case "$line" in
+	'' | q | Q) break ;;
+	*)
+		python3 -c 'import sys; print("  got:", repr(sys.argv[1]))' "$line"
+		;;
+	esac
+done
