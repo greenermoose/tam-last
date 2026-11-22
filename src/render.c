@@ -65,10 +65,10 @@ static void rect(uint32_t *px, int width, int height, int x0, int y0,
 	}
 }
 
-static void draw_glyph(struct tl_font *f, uint32_t cp, int span, uint32_t fg,
-	uint32_t *pixels, int width, int height, int px0, int py0)
+static void draw_glyph(struct tl_font *f, uint32_t cp, int span, uint8_t style,
+	uint32_t fg, uint32_t *pixels, int width, int height, int px0, int py0)
 {
-	const struct tl_glyph *g = tl_font_glyph(f, cp, span);
+	const struct tl_glyph *g = tl_font_glyph_styled(f, cp, span, style);
 	if (g == NULL)
 		return;
 	int gw = f->cell_w * span, ch = f->cell_h;
@@ -133,11 +133,17 @@ void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 			int px0 = pad + x * cw, py0 = pad + y * ch;
 			rect(pixels, width, height, px0, py0, cw * span, ch, bg);
 			if (c->cp != ' ' && !(c->attrs & TL_ATTR_HIDDEN)) {
-				draw_glyph(f, c->cp, span, fg, pixels, width,
-					height, px0, py0);
+				uint8_t style = 0;
+				if (c->attrs & TL_ATTR_BOLD)
+					style |= TL_STYLE_BOLD;
+				if (c->attrs & TL_ATTR_ITALIC)
+					style |= TL_STYLE_ITALIC;
+				draw_glyph(f, c->cp, span, style, fg, pixels,
+					width, height, px0, py0);
 				for (uint8_t i = 0; i < c->ncomb; i++)
-					draw_glyph(f, c->comb[i], span, fg,
-						pixels, width, height, px0, py0);
+					draw_glyph(f, c->comb[i], span, style,
+						fg, pixels, width, height, px0,
+						py0);
 			}
 			if (c->attrs & TL_ATTR_UNDERLINE)
 				rect(pixels, width, height, px0, py0 + f->baseline + line_h,

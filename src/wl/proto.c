@@ -98,6 +98,15 @@ void tl_surface_damage_buffer(struct tl_wire *w, uint32_t surface,
 	(void)tl_wire_send(w, surface, 9, &m);
 }
 
+void tl_surface_set_buffer_scale(struct tl_wire *w, uint32_t surface,
+	int32_t scale)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_i32(&m, scale);
+	(void)tl_wire_send(w, surface, 8, &m);
+}
+
 uint32_t tl_surface_frame(struct tl_wire *w, uint32_t surface, void *data)
 {
 	struct tl_msg m;

@@ -1,44 +1,48 @@
 WHATNOW
 
-What tamlinux is doing now and what comes next. Read this first; revise
+What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-21, with W7
+Updated: 2026-11-22, with W8
 
 
 STATE
 
-  Version 0.0.4 on branch dev (uncommitted working tree, ready for Fred's
-  trial). Scrollback and pointer support are implemented and verified:
-  - Scrollback in 64-row pages capped at 4096 rows (primary screen),
-    navigated with wheel and Shift+PgUp/PgDn; ED 3 clears scrollback.
-  - wl_pointer and optional wp_cursor_shape_v1 (text I-beam in normal
-    mode, default arrow in mouse reporting mode).
-  - Text selection (drag, double-click word, triple-click line) with
-    inverted cell rendering and UTF-8 extraction.
-  - Clipboard (wl_data_device) and optional primary selection
-    (zwp_primary_selection_v1): Ctrl+Shift+C/V, Shift+Insert, middle
-    click, and bracketed paste (DECSET 2004).
-  - Mouse reporting (1000, 1002, 1003, SGR 1006) with Shift bypass.
+  Version 0.0.5 on branch dev (Phase P1 foundation complete, ready for
+  Fred's trial). Implemented and verified:
+  - Integer HiDPI fallback via wl_compositor v6
+    wl_surface.preferred_buffer_scale and wl_surface.set_buffer_scale
+    when fractional-scale-v1/viewporter is absent.
+  - Bold, italic, and bold-italic sibling faces auto-discovered from
+    the main font path (or overridden in config), plus TrueType (glyf)
+    fallback font chain for missing glyphs.
+  - Procedural Box Drawing (U+2500..U+257F), Block Elements
+    (U+2580..U+259F), and Braille Patterns (U+2800..U+28FF) in
+    src/font/box.c so lines and blocks join pixel-for-pixel.
+  - Configuration via libtam's tam_ini (~/.config/tam-last/tam-last.ini
+    or -c/--config) for font, sibling/fallback faces, size, pad,
+    include=, and [colors]/[colors-dark], defaulting to Tamlinux's dark
+    theme.
 
-  make test (test_wire 114, test_vt 297, test_ttf 3036, test_keys 78,
-  test_render 25, version 0.0.4, headless tam-pane), ASan/UBSan sanitize
-  tests, and readelf -d (libc and libm only) all pass.
+  make test (test_wire 116, test_vt 297, test_ttf 3036, test_keys 78,
+  test_render 62, test_config 38, version 0.0.5, headless tam-pane),
+  ASan/UBSan sanitize tests, and readelf -d (libc and libm only) all
+  pass with zero warnings.
 
 
 NEXT
 
-  1. Fred tries tam-last 0.0.4 on DP-2 (scale 1.25): scrollback (wheel,
-     Shift+PgUp/PgDn), selection (drag/word/line), clipboard/primary
-     paste, bracketed paste, and mouse reporting in htop/vim.
-  2. Next milestone: 0.0.5 (integer HiDPI preferred buffer scale,
-     bold/italic faces, fallback font, box-drawing/block/Braille glyphs
-     by code, tam_ini config).
+  1. Fred tries tam-last 0.0.5 on DP-2 (scale 1.25): bold/italic/
+     bold-italic text, box-drawing/block/Braille characters, symbol
+     fallback, and optional ~/.config/tam-last/tam-last.ini.
+  2. Next phase and milestone: Phase P2, 0.1.0 (kitty keyboard
+     protocol: progressive enhancement flags, CSI u, release and repeat
+     events, alternate keys, flags stack; see plans/P2-key-path.md).
 
 
 WAITING FOR FRED
 
-  - Trying tam-last 0.0.4 on DP-2 (scale 1.25).
+  - Trying tam-last 0.0.5 on DP-2 (scale 1.25).
   - Open points in the plans: TERM (P1); where layouts live and kitty
     decoding in libtam (P2).
 
@@ -50,5 +54,5 @@ WATCH OUT
   - New escape sequences get checks in tests/test_vt.c.
   - The headless check runs under tam-pane, which has no keyboard and
     no fractional scaling. Never open windows on Fred's desktop.
-  - Bold and italic faces and the fallback font are 0.0.5; CJK shows the
-    missing-glyph box until then.
+  - Fallback fonts currently require TrueType (glyf) outlines; CFF
+    (.otf/.ttc) and CBDT color emoji fonts are skipped cleanly.

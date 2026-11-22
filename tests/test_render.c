@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "check.h"
+#include "tam-last/box.h"
 #include "tam-last/font.h"
 #include "tam-last/render.h"
 #include "tam-last/term.h"
@@ -100,6 +101,52 @@ int main(int argc, char **argv)
 	tl_term_free(&t);
 	tl_font_close(&font);
 
+	/* Procedural box drawing, block elements, and Braille patterns. */
+	{
+		int bw = 10, bh = 20;
+		uint8_t m[200];
+		CHECK(!tl_box_draw('A', m, bw, bh));
+		CHECK(tl_box_draw(0x2500, m, bw, bh)); /* ─ */
+		CHECK(m[(bh / 2) * bw + 0] == 255);
+		CHECK(m[(bh / 2) * bw + (bw - 1)] == 255);
+		CHECK(m[0] == 0);
+		CHECK(tl_box_draw(0x2502, m, bw, bh)); /* │ */
+		CHECK(m[0 * bw + bw / 2] == 255);
+		CHECK(m[(bh - 1) * bw + bw / 2] == 255);
+		CHECK(m[0] == 0);
+		CHECK(tl_box_draw(0x253C, m, bw, bh)); /* ┼ */
+		CHECK(m[(bh / 2) * bw + 0] == 255 && m[0 * bw + bw / 2] == 255);
+		CHECK(tl_box_draw(0x256D, m, bw, bh)); /* ╭ */
+		CHECK(m[(bh / 2) * bw + (bw - 1)] == 255 &&
+			m[(bh - 1) * bw + bw / 2] == 255);
+		CHECK(tl_box_draw(0x2571, m, bw, bh)); /* ╱ */
+		CHECK(m[(bh / 2) * bw + bw / 2] > 0);
+		CHECK(tl_box_draw(0x2588, m, bw, bh)); /* █ */
+		CHECK(m[0] == 255 && m[bw * bh - 1] == 255);
+		CHECK(tl_box_draw(0x2584, m, bw, bh)); /* ▄ */
+		CHECK(m[0] == 0 && m[(bh - 1) * bw] == 255);
+		CHECK(tl_box_draw(0x2592, m, bw, bh)); /* ▒ */
+		CHECK(m[0] == 128 && m[bw * bh - 1] == 128);
+		CHECK(tl_box_draw(0x259A, m, bw, bh)); /* ▚ */
+		CHECK(m[0] == 255 && m[bw - 1] == 0 &&
+			m[(bh - 1) * bw] == 0 && m[bw * bh - 1] == 255);
+		CHECK(tl_box_draw(0x2800, m, bw, bh)); /* ⠀ */
+		int sum0 = 0;
+		for (int i = 0; i < bw * bh; i++)
+			sum0 += m[i];
+		CHECK(sum0 == 0);
+		CHECK(tl_box_draw(0x28FF, m, bw, bh)); /* ⣿ */
+		int sum_all = 0;
+		for (int i = 0; i < bw * bh; i++)
+			sum_all += m[i];
+		CHECK(sum_all > 0);
+		CHECK(tl_box_draw(0x2801, m, bw, bh)); /* ⠁ */
+		int sum_one = 0;
+		for (int i = 0; i < bw * bh; i++)
+			sum_one += m[i];
+		CHECK(sum_one > 0 && sum_one < sum_all);
+	}
+
 	/* Sample screens with the real font, at scale 1 (96 dpi) and at
 	 * 1.25 (120 dpi, as on Fred's DP-1 and DP-2). */
 	const char *path = tl_font_find(NULL);
@@ -107,14 +154,34 @@ int main(int argc, char **argv)
 	for (int k = 0; path != NULL && k < 2; k++) {
 		if (tl_font_open(&font, path, 9, dpis[k], err, sizeof(err)) != 0)
 			break;
-		CHECK(tl_term_init(&t, 64, 12) == 0);
+		tl_font_load_siblings(&font);
+		tl_font_load_default_fallbacks(&font);
+		if (font.faces[TL_STYLE_BOLD].loaded) {
+			const struct tl_glyph *gr = tl_font_glyph_styled(&font,
+				'M', 1, TL_STYLE_REGULAR);
+			const struct tl_glyph *gb = tl_font_glyph_styled(&font,
+				'M', 1, TL_STYLE_BOLD);
+			CHECK(gr != NULL && gb != NULL);
+			CHECK(memcmp(gr->mask, gb->mask,
+				(size_t)font.cell_w * (size_t)font.cell_h) != 0);
+		}
+		if (font.faces[TL_STYLE_ITALIC].loaded) {
+			const struct tl_glyph *gr = tl_font_glyph_styled(&font,
+				'a', 1, TL_STYLE_REGULAR);
+			const struct tl_glyph *gi = tl_font_glyph_styled(&font,
+				'a', 1, TL_STYLE_ITALIC);
+			CHECK(gr != NULL && gi != NULL);
+			CHECK(memcmp(gr->mask, gi->mask,
+				(size_t)font.cell_w * (size_t)font.cell_h) != 0);
+		}
+		CHECK(tl_term_init(&t, 64, 14) == 0);
 		feed(&t, "\033[32mfred@bosgame\033[0m:\033[34m~/Code/tamlinux/tam-last\033[0m$ ls --color\r\n"
 			"\033[1;34march\033[0m  \033[1;34mbuild\033[0m  COPYRIGHT  LICENSE  Makefile  README\r\n"
-			"\033[1;34msrc\033[0m   \033[1;34mtests\033[0m  \033[32mtools/pull-references\033[0m  VERSION\r\n"
-			"\033[38;5;208m256 colours\033[0m, \033[38;2;180;120;250mdirect colour\033[0m, "
-			"\033[4munderline\033[0m, \033[7minverse\033[0m\r\n"
-			"Unicode: caf\xc3\xa9, \xce\xbb, \xe2\x86\x92, \xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80, "
-			"\xe6\xbc\xa2\xe5\xad\x97, Nerd \xef\x80\x95\r\n"
+			"\033[1mbold\033[0m  \033[3mitalic\033[0m  \033[1;3mbold-italic\033[0m  \033[4munderline\033[0m  \033[7minverse\033[0m\r\n"
+			"\033[38;5;208m256 colours\033[0m, \033[38;2;180;120;250mdirect colour\033[0m\r\n"
+			"\xe2\x94\x8c\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x90 \xe2\x95\x94\xe2\x95\x90\xe2\x95\x97 \xe2\x95\xad\xe2\x94\x80\xe2\x95\xae \xe2\x96\x80\xe2\x96\x84\xe2\x96\x88\xe2\x96\x91\xe2\x96\x92\xe2\x96\x93 \xe2\xa0\x81\xe2\xa0\x8b\xe2\xa3\xbf\r\n"
+			"\xe2\x94\x94\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x98 \xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d \xe2\x95\xb0\xe2\x94\x80\xe2\x95\xaf \xe2\x95\xb1\xe2\x95\xb2\xe2\x95\xb3\r\n"
+			"Unicode: caf\xc3\xa9, \xce\xbb, \xe2\x86\x92, \xe2\x98\x85, Nerd \xef\x80\x95\r\n"
 			"The quick brown fox jumps over the lazy dog 0123456789\r\n"
 			"il1| O0 {}[]() <>=! ->  ~`'\" @#$%^&*\r\n"
 			"\033[32mfred@bosgame\033[0m:\033[34m~\033[0m$ ");

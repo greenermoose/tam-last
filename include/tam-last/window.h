@@ -45,6 +45,9 @@ struct tl_window {
 	uint32_t data_mgr, data_device;
 	uint32_t primary_mgr, primary_device;
 	int dest_w, dest_h; /* the viewport destination last set */
+	uint32_t compositor_version;
+	int32_t buffer_scale;
+	int32_t sent_buffer_scale;
 	uint32_t surface, xdg_surface, toplevel, keyboard, pointer;
 	uint32_t frame_cb, sync_cb;
 	uint32_t seat_version;

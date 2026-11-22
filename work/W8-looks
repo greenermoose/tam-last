@@ -1,0 +1,45 @@
+W8 LOOKS (0.0.5)
+
+Date: 2026-11-22
+AI harness: agy 1.5.14
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice of tam-last."
+  Fred: "Approved. Proceed."
+
+
+DONE
+
+  - Integer HiDPI fallback without fractional-scale-v1: bound
+    wl_compositor up to v6, handled wl_surface.preferred_buffer_scale,
+    and sent wl_surface.set_buffer_scale when viewporter is absent
+    (opcodes verified against protocols/wayland.xml in test_wire.c).
+  - Bold, italic, and bold-italic sibling face loading plus optional
+    TrueType (glyf) fallback font chain in src/font/font.c, with style
+    in the glyph cache key and wired into src/render.c.
+  - Procedural rendering of Box Drawing (U+2500..U+257F), Block Elements
+    (U+2580..U+259F), and Braille Patterns (U+2800..U+28FF) in
+    include/tam-last/box.h and src/font/box.c.
+  - Configuration file support (~/.config/tam-last/tam-last.ini and
+    -c/--config) via libtam's tam_ini in include/tam-last/config.h and
+    src/config.c, with [main], [colors], [colors-dark], and include=
+    compatibility with Tamlinux themes.
+  - Added tests/test_config.c and expanded tests/test_wire.c and
+    tests/test_render.c; bumped VERSION to 0.0.5.
+  - Verified make clean && make (zero warnings), make test, make
+    sanitize (ASan/UBSan, including headless tam-pane), and readelf -d
+    (libc.so.6 and libm.so.6 only).
+
+
+FAILED
+
+  - Nothing.
+
+
+HANDOFF
+
+  - Fred tries 0.0.5 on DP-2 (scale 1.25); next milestone is 0.1.0
+    (Phase P2: kitty keyboard protocol).

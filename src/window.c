@@ -26,9 +26,12 @@ static void on_global(struct tl_window *win, struct tl_event *ev)
 	if (ev->bad || iface == NULL)
 		return;
 	if (strcmp(iface, "wl_compositor") == 0 && win->compositor == 0) {
-		if (version >= 4)
+		if (version >= 4) {
+			win->compositor_version = min_u32(version, 6);
 			win->compositor = tl_registry_bind(w, win->registry, name,
-				iface, 4, TL_IF_COMPOSITOR, win);
+				iface, win->compositor_version, TL_IF_COMPOSITOR,
+				win);
+		}
 	} else if (strcmp(iface, "wl_shm") == 0 && win->shm == 0) {
 		win->shm = tl_registry_bind(w, win->registry, name, iface, 1,
 			TL_IF_SHM, win);
@@ -474,6 +477,18 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 					win->pending_h);
 		}
 		break;
+	case TL_IF_SURFACE:
+		if (ev->opcode == TL_SURFACE_PREFERRED_BUFFER_SCALE) {
+			int32_t factor = tl_ev_i32(ev);
+			if (!ev->bad && factor >= 1 && factor <= 8 &&
+			    (win->viewport == 0 || win->fractional == 0)) {
+				win->buffer_scale = factor;
+				if (win->ev->scale != NULL)
+					win->ev->scale(win->ud,
+						(uint32_t)factor * 120u);
+			}
+		}
+		break;
 	case TL_IF_FRACTIONAL_SCALE:
 		if (ev->opcode == TL_FRACTIONAL_PREFERRED_SCALE) {
 			uint32_t scale = tl_ev_u32(ev);
@@ -587,6 +602,8 @@ int tl_window_open(struct tl_window *win, const char *title,
 {
 	memset(win, 0, sizeof(*win));
 	win->wire.fd = -1;
+	win->buffer_scale = 1;
+	win->sent_buffer_scale = 1;
 	win->ev = ev;
 	win->ud = ud;
 	if (tl_wire_connect(&win->wire, win->err, sizeof(win->err)) != 0)
@@ -680,17 +697,24 @@ struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
 
 bool tl_window_can_scale(const struct tl_window *win)
 {
-	return win->viewport != 0 && win->fractional != 0;
+	return (win->viewport != 0 && win->fractional != 0) ||
+		win->compositor_version >= 6;
 }
 
 void tl_window_present_damage(struct tl_window *win, struct tl_buffer *b,
 	int width, int height, const struct tl_rect *rects, size_t nrects)
 {
 	struct tl_wire *w = &win->wire;
-	if (win->viewport != 0 && (width != win->dest_w || height != win->dest_h)) {
-		tl_viewport_set_destination(w, win->viewport, width, height);
-		win->dest_w = width;
-		win->dest_h = height;
+	if (win->viewport != 0) {
+		if (width != win->dest_w || height != win->dest_h) {
+			tl_viewport_set_destination(w, win->viewport, width,
+				height);
+			win->dest_w = width;
+			win->dest_h = height;
+		}
+	} else if (win->buffer_scale != win->sent_buffer_scale) {
+		tl_surface_set_buffer_scale(w, win->surface, win->buffer_scale);
+		win->sent_buffer_scale = win->buffer_scale;
 	}
 	tl_surface_attach(w, win->surface, b->id);
 	if (nrects == 0) {

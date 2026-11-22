@@ -16,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "tam-last/config.h"
 #include "tam-last/font.h"
 #include "tam-last/keys.h"
 #include "tam-last/proto.h"
@@ -44,8 +45,10 @@ struct app {
 	struct tl_pty pty;
 	struct tl_kbd kbd;
 	struct tl_palette pal;
+	struct tl_config cfg;
 	const char *font_path;
 	float pt;
+	int pad_logical;
 	/* The scale in 120ths (fractional-scale-v1). The window is lw x lh
 	 * logical pixels; the buffer and everything drawn in it are
 	 * width x height device pixels, the logical size times the scale. */
@@ -86,8 +89,9 @@ static void on_sigchld(int sig)
 
 static void usage(FILE *out)
 {
-	fputs("usage: tam-last [-f FONT] [-s POINTS] [-e COMMAND [ARG...]]\n"
+	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-e COMMAND [ARG...]]\n"
 	      "\n"
+	      "  -c, --config FILE  configuration file (default: ~/.config/tam-last/tam-last.ini)\n"
 	      "  -f, --font FILE    a TrueType font file (default: $TAM_LAST_FONT,\n"
 	      "                     then JetBrains Mono, DejaVu Sans Mono, ...)\n"
 	      "  -s, --size POINTS  font size (default 9)\n"
@@ -234,7 +238,7 @@ static int to_logical(const struct app *a, int v)
 /* Fit the grid to the window's logical size at the current scale. */
 static void layout(struct app *a)
 {
-	a->pad = to_device(a, PAD);
+	a->pad = to_device(a, a->pad_logical);
 	a->width = to_device(a, a->lw);
 	a->height = to_device(a, a->lh);
 	int cols = (a->width - 2 * a->pad) / a->font.cell_w;
@@ -255,9 +259,9 @@ static void on_configure(void *ud, int width, int height)
 	if (width <= 0 || height <= 0) {
 		/* Ours to choose: keep the current grid. */
 		width = to_logical(a, a->term.cols * a->font.cell_w +
-			2 * to_device(a, PAD));
+			2 * to_device(a, a->pad_logical));
 		height = to_logical(a, a->term.rows * a->font.cell_h +
-			2 * to_device(a, PAD));
+			2 * to_device(a, a->pad_logical));
 	}
 	a->lw = width;
 	a->lh = height;
@@ -267,12 +271,25 @@ static void on_configure(void *ud, int width, int height)
 }
 
 /* The font at the size it has on this output: pt points at 96 dpi times
- * the scale. */
+ * the scale, with bold/italic sibling faces and fallback fonts. */
 static int open_font(struct app *a, struct tl_font *f, char *err,
 	size_t errlen)
 {
 	int dpi = (int)((96L * a->scale120 + 60) / 120);
-	return tl_font_open(f, a->font_path, a->pt, dpi, err, errlen);
+	if (tl_font_open(f, a->font_path, a->pt, dpi, err, errlen) != 0)
+		return -1;
+	if (a->cfg.font_bold[0] != '\0')
+		(void)tl_font_load_face(f, TL_STYLE_BOLD, a->cfg.font_bold);
+	if (a->cfg.font_italic[0] != '\0')
+		(void)tl_font_load_face(f, TL_STYLE_ITALIC, a->cfg.font_italic);
+	if (a->cfg.font_bold_italic[0] != '\0')
+		(void)tl_font_load_face(f, TL_STYLE_BOLD_ITALIC,
+			a->cfg.font_bold_italic);
+	tl_font_load_siblings(f);
+	if (a->cfg.font_fallback[0] != '\0')
+		(void)tl_font_add_fallback(f, a->cfg.font_fallback);
+	tl_font_load_default_fallbacks(f);
+	return 0;
 }
 
 static void on_scale(void *ud, uint32_t scale120)
@@ -676,8 +693,10 @@ static void setup_locale(void)
 
 int main(int argc, char **argv)
 {
+	const char *config_path = NULL;
 	const char *font_path = NULL;
-	float pt = 9;
+	float pt = 0;
+	bool pt_set = false;
 	char **cmd = NULL;
 
 	for (int i = 1; i < argc; i++) {
@@ -689,6 +708,9 @@ int main(int argc, char **argv)
 			}
 			cmd = argv + i + 1;
 			break;
+		} else if ((strcmp(s, "-c") == 0 || strcmp(s, "--config") == 0) &&
+			   i + 1 < argc) {
+			config_path = argv[++i];
 		} else if ((strcmp(s, "-f") == 0 || strcmp(s, "--font") == 0) &&
 			   i + 1 < argc) {
 			font_path = argv[++i];
@@ -700,6 +722,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "tam-last: bad size: %s\n", argv[i]);
 				return 2;
 			}
+			pt_set = true;
 		} else if (strcmp(s, "-v") == 0 || strcmp(s, "--version") == 0) {
 			printf("tam-last %s\n", TL_VERSION);
 			return 0;
@@ -717,11 +740,25 @@ int main(int argc, char **argv)
 	static struct app a;
 	a.paste_fd = -1;
 	char err[300];
-	tl_palette_default(&a.pal);
+	tl_config_default(&a.cfg);
+	if (config_path != NULL) {
+		if (tl_config_load_file(&a.cfg, config_path) != 0)
+			fprintf(stderr, "tam-last: cannot read config %s\n",
+				config_path);
+	} else {
+		char def_cfg[512];
+		tl_config_default_path(def_cfg, sizeof(def_cfg));
+		if (def_cfg[0] != '\0')
+			(void)tl_config_load_file(&a.cfg, def_cfg);
+	}
+	a.pal = a.cfg.pal;
+	a.pad_logical = a.cfg.pad;
 	tl_kbd_init(&a.kbd);
 
-	a.font_path = tl_font_find(font_path);
-	a.pt = pt;
+	const char *want_font = font_path != NULL ? font_path :
+		(a.cfg.font[0] != '\0' ? a.cfg.font : NULL);
+	a.font_path = tl_font_find(want_font);
+	a.pt = pt_set ? pt : a.cfg.size;
 	a.scale120 = 120; /* until the compositor says otherwise */
 	if (a.font_path == NULL) {
 		fprintf(stderr, "tam-last: no font found; use --font FILE\n");
@@ -735,9 +772,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "tam-last: out of memory\n");
 		return 1;
 	}
-	a.pad = PAD;
-	a.width = a.lw = DEFAULT_COLS * a.font.cell_w + 2 * PAD;
-	a.height = a.lh = DEFAULT_ROWS * a.font.cell_h + 2 * PAD;
+	a.pad = a.pad_logical;
+	a.width = a.lw = DEFAULT_COLS * a.font.cell_w + 2 * a.pad_logical;
+	a.height = a.lh = DEFAULT_ROWS * a.font.cell_h + 2 * a.pad_logical;
 
 	if (pipe(sigchld_pipe) != 0) {
 		perror("tam-last: pipe");

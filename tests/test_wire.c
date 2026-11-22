@@ -155,6 +155,7 @@ int main(void)
 	REQ(wl, "wl_compositor", "create_surface", tl_compositor_create_surface(&client, 3, NULL));
 	REQ(wl, "wl_surface", "attach", tl_surface_attach(&client, 4, 5));
 	REQ(wl, "wl_surface", "damage_buffer", tl_surface_damage_buffer(&client, 4, 0, 0, 1, 1));
+	REQ(wl, "wl_surface", "set_buffer_scale", tl_surface_set_buffer_scale(&client, 4, 2));
 	REQ(wl, "wl_surface", "frame", tl_surface_frame(&client, 4, NULL));
 	REQ(wl, "wl_surface", "commit", tl_surface_commit(&client, 4));
 	REQ(wl, "wl_surface", "destroy", tl_surface_destroy(&client, 4));
@@ -205,6 +206,7 @@ int main(void)
 	EVT(wl, "wl_display", "delete_id", TL_DISPLAY_DELETE_ID);
 	EVT(wl, "wl_registry", "global", TL_REGISTRY_GLOBAL);
 	EVT(wl, "wl_callback", "done", TL_CALLBACK_DONE);
+	EVT(wl, "wl_surface", "preferred_buffer_scale", TL_SURFACE_PREFERRED_BUFFER_SCALE);
 	EVT(wl, "wl_buffer", "release", TL_BUFFER_RELEASE);
 	EVT(wl, "wl_seat", "capabilities", TL_SEAT_CAPABILITIES);
 	EVT(wl, "wl_keyboard", "keymap", TL_KEYBOARD_KEYMAP);

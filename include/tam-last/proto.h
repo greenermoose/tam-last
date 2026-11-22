@@ -13,6 +13,7 @@ enum {
 	TL_REGISTRY_GLOBAL = 0, TL_REGISTRY_GLOBAL_REMOVE = 1,
 	TL_CALLBACK_DONE = 0,
 	TL_SURFACE_ENTER = 0, TL_SURFACE_LEAVE = 1,
+	TL_SURFACE_PREFERRED_BUFFER_SCALE = 2,
 	TL_SHM_FORMAT = 0,
 	TL_BUFFER_RELEASE = 0,
 	TL_SEAT_CAPABILITIES = 0, TL_SEAT_NAME = 1,
@@ -56,6 +57,8 @@ void tl_surface_destroy(struct tl_wire *w, uint32_t surface);
 void tl_surface_attach(struct tl_wire *w, uint32_t surface, uint32_t buffer);
 void tl_surface_damage_buffer(struct tl_wire *w, uint32_t surface,
 	int32_t x, int32_t y, int32_t width, int32_t height);
+void tl_surface_set_buffer_scale(struct tl_wire *w, uint32_t surface,
+	int32_t scale);
 uint32_t tl_surface_frame(struct tl_wire *w, uint32_t surface, void *data);
 void tl_surface_commit(struct tl_wire *w, uint32_t surface);
 
