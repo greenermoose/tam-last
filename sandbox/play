@@ -43,13 +43,13 @@ while :; do
 	fi
 
 	case "$ch" in
-	1) "$DIR/demo-looks" --in-term ;;
-	2) "$DIR/demo-colors" --in-term ;;
-	3) "$DIR/demo-scrollback" --in-term ;;
-	4) "$DIR/demo-mouse" --in-term ;;
-	5) "$DIR/demo-fullscreen" --in-term ;;
+	1) "$DIR/demo-looks" --in-term || true ;;
+	2) "$DIR/demo-colors" --in-term || true ;;
+	3) "$DIR/demo-scrollback" --in-term || true ;;
+	4) "$DIR/demo-mouse" --in-term || true ;;
+	5) "$DIR/demo-fullscreen" --in-term || true ;;
 	6) "$DIR/demo-config" & ;;
-	s | S) "${SHELL:-/bin/sh}" ;;
+	s | S) "${SHELL:-/bin/sh}" || true ;;
 	q | Q | '') break ;;
 	esac
 done

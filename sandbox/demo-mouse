@@ -4,7 +4,7 @@
 #   - Right-click / drag: erase cells
 #   - Scroll wheel: cycle brush color
 #   - Hold Shift + drag: bypass mouse reporting for normal text selection
-#   - Press 'c' to clear, 'q' to quit
+#   - Press c to clear, q to quit
 set -eu
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
@@ -13,7 +13,7 @@ if [ "${1:-}" != "--in-term" ]; then
 	exec "$ROOT/build/tam-last" -e "$0" --in-term
 fi
 
-python3 - <<'PY'
+exec python3 -c '
 import os, re, sys, termios, tty
 
 COLORS = [
@@ -59,7 +59,8 @@ try:
                     wheel = (cb & 64) != 0
                     if wheel:
                         color_idx = (color_idx + (-1 if btn == 0 else 1)) % len(COLORS)
-                        draw_header(f"wheel {'up' if btn == 0 else 'down'} at ({cx},{cy})")
+                        direction = "up" if btn == 0 else "down"
+                        draw_header(f"wheel {direction} at ({cx},{cy})")
                     elif kind == "m":
                         painting = 0
                         draw_header(f"release btn={btn} at ({cx},{cy})")
@@ -72,7 +73,8 @@ try:
                                 sys.stdout.write(f"\033[{cy};{cx}H\033[48;5;{code}m \033[0m")
                             else:
                                 sys.stdout.write(f"\033[{cy};{cx}H ")
-                        draw_header(f"{'drag' if motion else 'press'} btn={btn} at ({cx},{cy})")
+                        action = "drag" if motion else "press"
+                        draw_header(f"{action} btn={btn} at ({cx},{cy})")
                     continue
                 if len(buf) < 20 and (len(buf) == 1 or buf.startswith("\x1b[")):
                     break  # wait for rest of sequence
@@ -91,4 +93,4 @@ finally:
     sys.stdout.write("\033[?1006l\033[?1002l\033[?1000l\033[?25h\033[?1049l")
     sys.stdout.flush()
     termios.tcsetattr(fd, termios.TCSADRAIN, old)
-PY
+'

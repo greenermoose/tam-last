@@ -9,7 +9,7 @@ if [ "${1:-}" != "--in-term" ]; then
 	exec "$ROOT/build/tam-last" -e "$0" --in-term
 fi
 
-python3 - <<'PY'
+exec python3 -c '
 import os, sys, termios, tty
 
 fd = sys.stdin.fileno()
@@ -17,7 +17,7 @@ old = termios.tcgetattr(fd)
 out = sys.stdout.write
 
 def draw_frame(style_name, style_code):
-    out(f"\033[?1049h\033[2J\033[H")
+    out("\033[?1049h\033[2J\033[H")
     out("\033[1;36m=== tam-last 0.0.3: Full-Screen, Scroll Region, Cursor Styles & DEC Gfx ===\033[0m\n")
     out("  Keys: [1] Block cursor   [2] Underline cursor   [3] Bar cursor   [s] Scroll region   [q] Quit\n")
     out("  DEC Special Graphics (ESC ( 0): \033(0lqqqqwqqqqk  x a ` f g ~ x  mqqqqvqqqqj\033(B\n")
@@ -61,4 +61,4 @@ finally:
     out("\033[r\033[0 q\033[?1049l")
     sys.stdout.flush()
     termios.tcsetattr(fd, termios.TCSADRAIN, old)
-PY
+'
