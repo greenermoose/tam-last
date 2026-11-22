@@ -8,8 +8,9 @@ Updated: 2026-11-22, with W8
 
 STATE
 
-  Version 0.0.6 on branch dev (Phase P1 foundation complete, ready for
-  Fred's trial). Implemented and verified:
+  Version 0.0.6 on branch dev (Phase P1 foundation complete; Fred
+  accepted 0.0.6 via sandbox/play on 2026-11-22). Implemented and
+  verified:
   - Integer HiDPI fallback via wl_compositor v6
     wl_surface.preferred_buffer_scale and wl_surface.set_buffer_scale
     when fractional-scale-v1/viewporter is absent.
@@ -32,18 +33,13 @@ STATE
 
 NEXT
 
-  1. Fred tries tam-last 0.0.5 on DP-2 (scale 1.25) via ./sandbox/play
-     (or individual ./sandbox/demo-* scripts): bold/italic/bold-italic,
-     box-drawing/block/Braille, symbol fallback, mouse canvas,
-     scrollback/paste, and -c sandbox/theme-gruvbox.ini.
-  2. Next phase and milestone: Phase P2, 0.1.0 (kitty keyboard
-     protocol: progressive enhancement flags, CSI u, release and repeat
-     events, alternate keys, flags stack; see plans/P2-key-path.md).
+  1. Phase P2, 0.1.0 (kitty keyboard protocol: progressive enhancement
+     flags, CSI u, release and repeat events, alternate keys, flags
+     stack; see plans/P2-key-path.md).
 
 
 WAITING FOR FRED
 
-  - Trying tam-last 0.0.5 on DP-2 (scale 1.25).
   - Open points in the plans: TERM (P1); where layouts live and kitty
     decoding in libtam (P2).
 

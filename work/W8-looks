@@ -10,6 +10,7 @@ GUIDANCE
   Fred: "/plan Do the next work slice of tam-last."
   Fred: "Approved. Proceed."
   Fred: "Create a sandbox with demos for me to play with in tam-last."
+  Fred: "pass. commit"
 
 
 DONE
@@ -50,5 +51,5 @@ FAILED
 
 HANDOFF
 
-  - Fred tries 0.0.5 on DP-2 (scale 1.25); next milestone is 0.1.0
-    (Phase P2: kitty keyboard protocol).
+  - Fred accepted 0.0.6 on 2026-11-22 (Phase P1 foundation complete).
+  - Next milestone is Phase P2, 0.1.0 (kitty keyboard protocol).
