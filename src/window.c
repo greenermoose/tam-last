@@ -2,8 +2,10 @@
 #include "tam-last/window.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -31,7 +33,7 @@ static void on_global(struct tl_window *win, struct tl_event *ev)
 		win->shm = tl_registry_bind(w, win->registry, name, iface, 1,
 			TL_IF_SHM, win);
 	} else if (strcmp(iface, "wl_seat") == 0 && win->seat == 0) {
-		win->seat_version = min_u32(version, 5);
+		win->seat_version = min_u32(version, 8);
 		win->seat = tl_registry_bind(w, win->registry, name, iface,
 			win->seat_version, TL_IF_SEAT, win);
 	} else if (strcmp(iface, "xdg_wm_base") == 0 && win->wm_base == 0) {
@@ -44,6 +46,18 @@ static void on_global(struct tl_window *win, struct tl_event *ev)
 		   win->fractional_manager == 0) {
 		win->fractional_manager = tl_registry_bind(w, win->registry, name,
 			iface, 1, TL_IF_FRACTIONAL_MANAGER, win);
+	} else if (strcmp(iface, "wp_cursor_shape_manager_v1") == 0 &&
+		   win->cursor_shape_mgr == 0) {
+		win->cursor_shape_mgr = tl_registry_bind(w, win->registry, name,
+			iface, 1, TL_IF_CURSOR_SHAPE_MGR, win);
+	} else if (strcmp(iface, "wl_data_device_manager") == 0 &&
+		   win->data_mgr == 0) {
+		win->data_mgr = tl_registry_bind(w, win->registry, name, iface,
+			min_u32(version, 3), TL_IF_DATA_DEVICE_MGR, win);
+	} else if (strcmp(iface, "zwp_primary_selection_device_manager_v1") == 0 &&
+		   win->primary_mgr == 0) {
+		win->primary_mgr = tl_registry_bind(w, win->registry, name,
+			iface, 1, TL_IF_PRIMARY_MGR, win);
 	}
 }
 
@@ -99,13 +113,17 @@ static void on_keyboard(struct tl_window *win, struct tl_event *ev)
 			cb->focus_out(win->ud);
 		break;
 	case TL_KEYBOARD_KEY: {
-		(void)tl_ev_u32(ev); /* serial */
+		uint32_t serial = tl_ev_u32(ev);
 		(void)tl_ev_u32(ev); /* time */
 		uint32_t code = tl_ev_u32(ev);
 		uint32_t state = tl_ev_u32(ev);
 		/* state 2 is "repeated" (wl_seat v10); we repeat ourselves. */
-		if (!ev->bad && state != 2 && cb->key != NULL)
-			cb->key(win->ud, code, state == 1);
+		if (!ev->bad && state != 2) {
+			if (state == 1)
+				win->last_serial = serial;
+			if (cb->key != NULL)
+				cb->key(win->ud, code, state == 1);
+		}
 		break;
 	}
 	case TL_KEYBOARD_MODIFIERS: {
@@ -125,6 +143,127 @@ static void on_keyboard(struct tl_window *win, struct tl_event *ev)
 		break;
 	}
 	}
+}
+
+static void on_pointer(struct tl_window *win, struct tl_event *ev)
+{
+	const struct tl_window_events *cb = win->ev;
+
+	switch (ev->opcode) {
+	case TL_POINTER_ENTER: {
+		uint32_t serial = tl_ev_u32(ev);
+		(void)tl_ev_u32(ev); /* surface */
+		double x = (double)tl_ev_i32(ev) / 256.0;
+		double y = (double)tl_ev_i32(ev) / 256.0;
+		if (ev->bad)
+			break;
+		win->pointer_enter_serial = serial;
+		if (win->cursor_shape_dev != 0 && win->cursor_shape != 0)
+			tl_cursor_shape_set(&win->wire, win->cursor_shape_dev,
+				serial, win->cursor_shape);
+		if (cb->pointer_enter != NULL)
+			cb->pointer_enter(win->ud, x, y);
+		break;
+	}
+	case TL_POINTER_LEAVE:
+		win->pointer_enter_serial = 0;
+		if (cb->pointer_leave != NULL)
+			cb->pointer_leave(win->ud);
+		break;
+	case TL_POINTER_MOTION: {
+		(void)tl_ev_u32(ev); /* time */
+		double x = (double)tl_ev_i32(ev) / 256.0;
+		double y = (double)tl_ev_i32(ev) / 256.0;
+		if (!ev->bad && cb->pointer_motion != NULL)
+			cb->pointer_motion(win->ud, x, y);
+		break;
+	}
+	case TL_POINTER_BUTTON: {
+		uint32_t serial = tl_ev_u32(ev);
+		uint32_t time = tl_ev_u32(ev);
+		uint32_t button = tl_ev_u32(ev);
+		uint32_t state = tl_ev_u32(ev);
+		if (!ev->bad) {
+			if (state == 1)
+				win->last_serial = serial;
+			if (cb->pointer_button != NULL)
+				cb->pointer_button(win->ud, button, state == 1,
+					time);
+		}
+		break;
+	}
+	case TL_POINTER_AXIS: {
+		(void)tl_ev_u32(ev); /* time */
+		uint32_t axis = tl_ev_u32(ev);
+		double val = (double)tl_ev_i32(ev) / 256.0;
+		if (!ev->bad && axis < 2) {
+			win->axis_pending[axis] = true;
+			win->axis_val[axis] += val;
+		}
+		break;
+	}
+	case TL_POINTER_AXIS_DISCRETE: {
+		uint32_t axis = tl_ev_u32(ev);
+		int32_t disc = tl_ev_i32(ev);
+		if (!ev->bad && axis < 2 && win->seat_version < 8) {
+			win->axis_pending[axis] = true;
+			win->axis_v120[axis] += disc * 120;
+		}
+		break;
+	}
+	case TL_POINTER_AXIS_VALUE120: {
+		uint32_t axis = tl_ev_u32(ev);
+		int32_t v120 = tl_ev_i32(ev);
+		if (!ev->bad && axis < 2) {
+			win->axis_pending[axis] = true;
+			win->axis_v120[axis] += v120;
+		}
+		break;
+	}
+	case TL_POINTER_FRAME:
+		for (uint32_t i = 0; i < 2; i++) {
+			if (!win->axis_pending[i])
+				continue;
+			if (cb->pointer_axis != NULL)
+				cb->pointer_axis(win->ud, i, win->axis_val[i],
+					win->axis_v120[i]);
+			win->axis_pending[i] = false;
+			win->axis_val[i] = 0;
+			win->axis_v120[i] = 0;
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+static void pick_mime(char dst[64], const char *mime)
+{
+	if (mime == NULL)
+		return;
+	if (strcmp(mime, "text/plain;charset=utf-8") == 0)
+		snprintf(dst, 64, "%s", mime);
+	else if (strcmp(mime, "text/plain") == 0 &&
+		 strcmp(dst, "text/plain;charset=utf-8") != 0)
+		snprintf(dst, 64, "%s", mime);
+	else if (strcmp(mime, "UTF8_STRING") == 0 && dst[0] == '\0')
+		snprintf(dst, 64, "%s", mime);
+}
+
+static void write_selection_fd(int fd, const char *data, size_t len)
+{
+	size_t off = 0;
+	while (off < len) {
+		ssize_t n = write(fd, data + off, len - off);
+		if (n > 0) {
+			off += (size_t)n;
+			continue;
+		}
+		if (n < 0 && errno == EINTR)
+			continue;
+		break;
+	}
+	close(fd);
 }
 
 static int dispatch_one(struct tl_window *win, struct tl_event *ev)
@@ -160,6 +299,21 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 			uint32_t caps = tl_ev_u32(ev);
 			if (ev->bad)
 				break;
+			if ((caps & TL_SEAT_CAP_POINTER) && win->pointer == 0) {
+				win->pointer = tl_seat_get_pointer(w, win->seat, win);
+				if (win->pointer != 0 && win->cursor_shape_mgr != 0)
+					win->cursor_shape_dev = tl_cursor_shape_get_pointer(
+						w, win->cursor_shape_mgr, win->pointer, win);
+			} else if (!(caps & TL_SEAT_CAP_POINTER) &&
+				   win->pointer != 0) {
+				if (win->cursor_shape_dev != 0) {
+					tl_cursor_shape_destroy(w, win->cursor_shape_dev);
+					win->cursor_shape_dev = 0;
+				}
+				if (win->seat_version >= 3)
+					tl_pointer_release(w, win->pointer);
+				win->pointer = 0;
+			}
 			if ((caps & TL_SEAT_CAP_KEYBOARD) && win->keyboard == 0) {
 				win->keyboard = tl_seat_get_keyboard(w, win->seat, win);
 			} else if (!(caps & TL_SEAT_CAP_KEYBOARD) &&
@@ -167,6 +321,126 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 				if (win->seat_version >= 3)
 					tl_keyboard_release(w, win->keyboard);
 				win->keyboard = 0;
+			}
+		}
+		break;
+	case TL_IF_POINTER:
+		if (ev->object == win->pointer)
+			on_pointer(win, ev);
+		break;
+	case TL_IF_DATA_DEVICE:
+		if (ev->opcode == TL_DATA_DEVICE_DATA_OFFER) {
+			uint32_t id = tl_ev_u32(ev);
+			if (!ev->bad && id != 0) {
+				if (win->pending_clip_offer != 0)
+					tl_data_offer_destroy(w, win->pending_clip_offer);
+				tl_wire_server_id(w, id, TL_IF_DATA_OFFER, win);
+				win->pending_clip_offer = id;
+				win->pending_clip_mime[0] = '\0';
+			}
+		} else if (ev->opcode == TL_DATA_DEVICE_SELECTION) {
+			uint32_t id = tl_ev_u32(ev);
+			if (ev->bad)
+				break;
+			if (win->clip_offer != 0 && win->clip_offer != id)
+				tl_data_offer_destroy(w, win->clip_offer);
+			if (id != 0 && id == win->pending_clip_offer) {
+				win->clip_offer = id;
+				memcpy(win->clip_mime, win->pending_clip_mime,
+					sizeof(win->clip_mime));
+				win->pending_clip_offer = 0;
+			} else {
+				win->clip_offer = 0;
+				win->clip_mime[0] = '\0';
+				if (id != 0)
+					tl_data_offer_destroy(w, id);
+			}
+		}
+		break;
+	case TL_IF_DATA_OFFER:
+		if (ev->opcode == TL_DATA_OFFER_OFFER) {
+			const char *mime = tl_ev_str(ev);
+			if (!ev->bad && ev->object == win->pending_clip_offer)
+				pick_mime(win->pending_clip_mime, mime);
+		}
+		break;
+	case TL_IF_DATA_SOURCE:
+		if (ev->opcode == TL_DATA_SOURCE_SEND) {
+			(void)tl_ev_str(ev);
+			int fd = tl_ev_fd(ev);
+			if (fd >= 0) {
+				if (!ev->bad && ev->object == win->clip_source &&
+				    win->clip_text != NULL)
+					write_selection_fd(fd, win->clip_text,
+						win->clip_len);
+				else
+					close(fd);
+			}
+		} else if (ev->opcode == TL_DATA_SOURCE_CANCELLED) {
+			if (ev->object == win->clip_source) {
+				tl_data_source_destroy(w, win->clip_source);
+				win->clip_source = 0;
+				free(win->clip_text);
+				win->clip_text = NULL;
+				win->clip_len = 0;
+			}
+		}
+		break;
+	case TL_IF_PRIMARY_DEVICE:
+		if (ev->opcode == TL_PRIMARY_DEVICE_DATA_OFFER) {
+			uint32_t id = tl_ev_u32(ev);
+			if (!ev->bad && id != 0) {
+				if (win->pending_prim_offer != 0)
+					tl_primary_offer_destroy(w, win->pending_prim_offer);
+				tl_wire_server_id(w, id, TL_IF_PRIMARY_OFFER, win);
+				win->pending_prim_offer = id;
+				win->pending_prim_mime[0] = '\0';
+			}
+		} else if (ev->opcode == TL_PRIMARY_DEVICE_SELECTION) {
+			uint32_t id = tl_ev_u32(ev);
+			if (ev->bad)
+				break;
+			if (win->prim_offer != 0 && win->prim_offer != id)
+				tl_primary_offer_destroy(w, win->prim_offer);
+			if (id != 0 && id == win->pending_prim_offer) {
+				win->prim_offer = id;
+				memcpy(win->prim_mime, win->pending_prim_mime,
+					sizeof(win->prim_mime));
+				win->pending_prim_offer = 0;
+			} else {
+				win->prim_offer = 0;
+				win->prim_mime[0] = '\0';
+				if (id != 0)
+					tl_primary_offer_destroy(w, id);
+			}
+		}
+		break;
+	case TL_IF_PRIMARY_OFFER:
+		if (ev->opcode == TL_PRIMARY_OFFER_OFFER) {
+			const char *mime = tl_ev_str(ev);
+			if (!ev->bad && ev->object == win->pending_prim_offer)
+				pick_mime(win->pending_prim_mime, mime);
+		}
+		break;
+	case TL_IF_PRIMARY_SOURCE:
+		if (ev->opcode == TL_PRIMARY_SOURCE_SEND) {
+			(void)tl_ev_str(ev);
+			int fd = tl_ev_fd(ev);
+			if (fd >= 0) {
+				if (!ev->bad && ev->object == win->prim_source &&
+				    win->prim_text != NULL)
+					write_selection_fd(fd, win->prim_text,
+						win->prim_len);
+				else
+					close(fd);
+			}
+		} else if (ev->opcode == TL_PRIMARY_SOURCE_CANCELLED) {
+			if (ev->object == win->prim_source) {
+				tl_primary_source_destroy(w, win->prim_source);
+				win->prim_source = 0;
+				free(win->prim_text);
+				win->prim_text = NULL;
+				win->prim_len = 0;
 			}
 		}
 		break;
@@ -345,6 +619,13 @@ int tl_window_open(struct tl_window *win, const char *title,
 		win->fractional = tl_fractional_get(w, win->fractional_manager,
 			win->surface, win);
 	}
+	if (win->seat != 0 && win->data_mgr != 0)
+		win->data_device = tl_data_mgr_get_device(w, win->data_mgr,
+			win->seat, win);
+	if (win->seat != 0 && win->primary_mgr != 0)
+		win->primary_device = tl_primary_mgr_get_device(w,
+			win->primary_mgr, win->seat, win);
+	win->cursor_shape = TL_CURSOR_SHAPE_TEXT;
 	tl_toplevel_set_title(w, win->toplevel, title);
 	tl_toplevel_set_app_id(w, win->toplevel, app_id);
 	/* The first commit, with no buffer, asks for the first configure. */
@@ -356,6 +637,9 @@ int tl_window_open(struct tl_window *win, const char *title,
 
 void tl_window_close(struct tl_window *win)
 {
+	free(win->clip_text);
+	free(win->prim_text);
+	win->clip_text = win->prim_text = NULL;
 	for (int i = 0; i < 2; i++)
 		tl_buffer_free(&win->bufs[i], &win->wire);
 	if (win->wire.fd >= 0) {
@@ -431,4 +715,95 @@ void tl_window_present(struct tl_window *win, struct tl_buffer *b,
 bool tl_window_frame_pending(const struct tl_window *win)
 {
 	return win->frame_cb != 0;
+}
+
+void tl_window_set_cursor(struct tl_window *win, uint32_t shape)
+{
+	if (win->cursor_shape == shape)
+		return;
+	win->cursor_shape = shape;
+	if (win->cursor_shape_dev != 0 && win->pointer_enter_serial != 0)
+		tl_cursor_shape_set(&win->wire, win->cursor_shape_dev,
+			win->pointer_enter_serial, shape);
+}
+
+static char *dup_text(const char *text, size_t len)
+{
+	char *p = malloc(len + 1);
+	if (p == NULL)
+		return NULL;
+	if (len > 0)
+		memcpy(p, text, len);
+	p[len] = '\0';
+	return p;
+}
+
+void tl_window_set_clipboard(struct tl_window *win, const char *text,
+	size_t len)
+{
+	if (win->data_mgr == 0 || win->data_device == 0 || text == NULL)
+		return;
+	if (win->clip_source != 0) {
+		tl_data_source_destroy(&win->wire, win->clip_source);
+		win->clip_source = 0;
+	}
+	free(win->clip_text);
+	win->clip_text = dup_text(text, len);
+	if (win->clip_text == NULL)
+		return;
+	win->clip_len = len;
+	win->clip_source = tl_data_mgr_create_source(&win->wire, win->data_mgr,
+		win);
+	if (win->clip_source == 0)
+		return;
+	tl_data_source_offer(&win->wire, win->clip_source,
+		"text/plain;charset=utf-8");
+	tl_data_source_offer(&win->wire, win->clip_source, "text/plain");
+	tl_data_source_offer(&win->wire, win->clip_source, "UTF8_STRING");
+	tl_data_device_set_selection(&win->wire, win->data_device,
+		win->clip_source, win->last_serial);
+}
+
+void tl_window_set_primary(struct tl_window *win, const char *text, size_t len)
+{
+	if (win->primary_mgr == 0 || win->primary_device == 0 || text == NULL)
+		return;
+	if (win->prim_source != 0) {
+		tl_primary_source_destroy(&win->wire, win->prim_source);
+		win->prim_source = 0;
+	}
+	free(win->prim_text);
+	win->prim_text = dup_text(text, len);
+	if (win->prim_text == NULL)
+		return;
+	win->prim_len = len;
+	win->prim_source = tl_primary_mgr_create_source(&win->wire,
+		win->primary_mgr, win);
+	if (win->prim_source == 0)
+		return;
+	tl_primary_source_offer(&win->wire, win->prim_source,
+		"text/plain;charset=utf-8");
+	tl_primary_source_offer(&win->wire, win->prim_source, "text/plain");
+	tl_primary_source_offer(&win->wire, win->prim_source, "UTF8_STRING");
+	tl_primary_device_set_selection(&win->wire, win->primary_device,
+		win->prim_source, win->last_serial);
+}
+
+int tl_window_paste(struct tl_window *win, bool primary)
+{
+	uint32_t offer = primary ? win->prim_offer : win->clip_offer;
+	const char *mime = primary ? win->prim_mime : win->clip_mime;
+	if (offer == 0 || mime[0] == '\0')
+		return -1;
+	int p[2];
+	if (pipe(p) != 0)
+		return -1;
+	fcntl(p[0], F_SETFD, FD_CLOEXEC);
+	fcntl(p[0], F_SETFL, O_NONBLOCK);
+	if (primary)
+		tl_primary_offer_receive(&win->wire, offer, mime, p[1]);
+	else
+		tl_data_offer_receive(&win->wire, offer, mime, p[1]);
+	close(p[1]);
+	return p[0];
 }

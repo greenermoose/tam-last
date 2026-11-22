@@ -18,8 +18,10 @@
 
 #include "tam-last/font.h"
 #include "tam-last/keys.h"
+#include "tam-last/proto.h"
 #include "tam-last/pty.h"
 #include "tam-last/render.h"
+#include "tam-last/select.h"
 #include "tam-last/term.h"
 #include "tam-last/window.h"
 
@@ -31,6 +33,9 @@
 #define DEFAULT_COLS 80
 #define DEFAULT_ROWS 24
 #define READ_CHUNK 65536
+#define TL_BTN_LEFT 0x110u
+#define TL_BTN_RIGHT 0x111u
+#define TL_BTN_MIDDLE 0x112u
 
 struct app {
 	struct tl_window win;
@@ -58,6 +63,15 @@ struct app {
 	int32_t repeat_rate, repeat_delay;
 	uint32_t repeat_code;
 	struct timespec repeat_at;
+	struct tl_sel sel;
+	int ptr_cx, ptr_cy;
+	bool ptr_inside;
+	uint32_t ptr_buttons;
+	uint32_t last_click_time;
+	int click_count;
+	double axis_acc;
+	int paste_fd;
+	bool paste_bracketed;
 };
 
 static int sigchld_pipe[2] = { -1, -1 };
@@ -157,7 +171,7 @@ static void draw(struct app *a, bool force)
 	int idx = (b == &a->win.bufs[1]) ? 1 : 0;
 	bool full = a->buf_full[idx] || a->buf_dirty[idx] == NULL;
 	tl_render_rows(&a->term, &a->font, &a->pal, b->pixels, b->width,
-		b->height, a->pad, a->focused, a->buf_dirty[idx], full);
+		b->height, a->pad, a->focused, &a->sel, a->buf_dirty[idx], full);
 
 	struct tl_rect rects[64];
 	size_t nrects = 0;
@@ -295,21 +309,291 @@ static void on_frame(void *ud)
 		draw(a, false);
 }
 
+static void update_cursor_shape(struct app *a)
+{
+	bool mouse_app = a->term.mouse_mode != TL_MOUSE_NONE &&
+		!(tl_kbd_mods(&a->kbd) & TL_MOD_SHIFT);
+	tl_window_set_cursor(&a->win, mouse_app ? TL_CURSOR_SHAPE_DEFAULT :
+		TL_CURSOR_SHAPE_TEXT);
+}
+
+static void start_paste(struct app *a, bool primary)
+{
+	if (a->paste_fd >= 0) {
+		close(a->paste_fd);
+		a->paste_fd = -1;
+	}
+	int fd = tl_window_paste(&a->win, primary);
+	if (fd < 0 && primary)
+		fd = tl_window_paste(&a->win, false);
+	if (fd < 0)
+		return;
+	a->paste_fd = fd;
+	a->paste_bracketed = a->term.bracketed_paste;
+	if (a->paste_bracketed)
+		(void)tl_pty_queue(&a->pty, "\033[200~", 6);
+}
+
+static void drain_paste(struct app *a)
+{
+	char buf[4096];
+	for (;;) {
+		ssize_t n = read(a->paste_fd, buf, sizeof(buf));
+		if (n > 0) {
+			/* Strip ESC when bracketed so pasted data cannot close \033[201~. */
+			if (a->paste_bracketed) {
+				for (ssize_t i = 0; i < n; i++)
+					if (buf[i] == '\033')
+						buf[i] = ' ';
+			}
+			(void)tl_pty_queue(&a->pty, buf, (size_t)n);
+			continue;
+		}
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+			return;
+		/* EOF or error: finish paste. */
+		if (a->paste_bracketed)
+			(void)tl_pty_queue(&a->pty, "\033[201~", 6);
+		a->paste_bracketed = false;
+		close(a->paste_fd);
+		a->paste_fd = -1;
+		return;
+	}
+}
+
+static bool mouse_reporting(const struct app *a)
+{
+	return a->term.mouse_mode != TL_MOUSE_NONE &&
+		!(tl_kbd_mods(&a->kbd) & TL_MOD_SHIFT);
+}
+
+static void ptr_to_cell(const struct app *a, double lx, double ly,
+	int *cx, int *cy)
+{
+	double dx = lx * (double)a->scale120 / 120.0;
+	double dy = ly * (double)a->scale120 / 120.0;
+	int x = (int)((dx - a->pad) / a->font.cell_w);
+	int y = (int)((dy - a->pad) / a->font.cell_h);
+	if (x < 0)
+		x = 0;
+	if (x >= a->term.cols)
+		x = a->term.cols - 1;
+	if (y < 0)
+		y = 0;
+	if (y >= a->term.rows)
+		y = a->term.rows - 1;
+	*cx = x;
+	*cy = y;
+}
+
+static int mouse_mod_bits(const struct app *a)
+{
+	unsigned m = tl_kbd_mods(&a->kbd);
+	int bits = 0;
+	if (m & TL_MOD_SHIFT)
+		bits |= 4;
+	if (m & TL_MOD_ALT)
+		bits |= 8;
+	if (m & TL_MOD_CTRL)
+		bits |= 16;
+	return bits;
+}
+
+static void send_mouse(struct app *a, int cb, int cx, int cy, bool release)
+{
+	cb |= mouse_mod_bits(a);
+	if (a->term.mouse_sgr) {
+		char buf[48];
+		int n = snprintf(buf, sizeof(buf), "\033[<%d;%d;%d%c",
+			cb, cx + 1, cy + 1, release ? 'm' : 'M');
+		if (n > 0)
+			(void)tl_pty_queue(&a->pty, buf, (size_t)n);
+		return;
+	}
+	if (release)
+		cb = (cb & ~3) | 3;
+	int x = cx + 1, y = cy + 1;
+	if (x > 223)
+		x = 223;
+	if (y > 223)
+		y = 223;
+	unsigned char pkt[6] = {
+		0x1b, '[', 'M',
+		(unsigned char)(32 + cb),
+		(unsigned char)(32 + x),
+		(unsigned char)(32 + y),
+	};
+	(void)tl_pty_queue(&a->pty, pkt, sizeof(pkt));
+}
+
+static int view_abs_y(const struct app *a, int cy)
+{
+	int sb = a->term.alt_screen ? 0 : a->term.sb_len;
+	int vo = a->term.alt_screen ? 0 : a->term.view_offset;
+	return sb - vo + cy;
+}
+
 static void on_key(void *ud, uint32_t code, bool pressed)
 {
 	struct app *a = ud;
 	tl_kbd_key(&a->kbd, code, pressed);
+	update_cursor_shape(a);
 	if (!pressed) {
 		if (code == a->repeat_code)
 			a->repeat_code = 0;
 		return;
 	}
+	unsigned mods = tl_kbd_mods(&a->kbd);
+	int page = a->term.rows / 2 > 0 ? a->term.rows / 2 : 1;
+	if (code == TL_KEY_PAGEUP && mods == TL_MOD_SHIFT) {
+		tl_term_scroll_view(&a->term, page);
+		draw(a, false);
+		return;
+	}
+	if (code == TL_KEY_PAGEDOWN && mods == TL_MOD_SHIFT) {
+		tl_term_scroll_view(&a->term, -page);
+		draw(a, false);
+		return;
+	}
+	if (code == TL_KEY_C && mods == (TL_MOD_CTRL | TL_MOD_SHIFT)) {
+		size_t len = 0;
+		char *text = tl_sel_extract(&a->term, &a->sel, &len);
+		if (text != NULL && len > 0)
+			tl_window_set_clipboard(&a->win, text, len);
+		free(text);
+		return;
+	}
+	if (code == TL_KEY_V && mods == (TL_MOD_CTRL | TL_MOD_SHIFT)) {
+		tl_term_reset_view(&a->term);
+		start_paste(a, false);
+		return;
+	}
+	if (code == TL_KEY_INSERT && mods == TL_MOD_SHIFT) {
+		tl_term_reset_view(&a->term);
+		start_paste(a, true);
+		return;
+	}
+	if (!tl_key_is_modifier(code))
+		tl_term_reset_view(&a->term);
 	send_key(a, code);
 	if (!tl_key_is_modifier(code) && a->repeat_rate > 0) {
 		a->repeat_code = code;
 		clock_gettime(CLOCK_MONOTONIC, &a->repeat_at);
 		ts_add_ms(&a->repeat_at, a->repeat_delay);
 	}
+}
+
+static void on_pointer_enter(void *ud, double x, double y)
+{
+	struct app *a = ud;
+	a->ptr_inside = true;
+	ptr_to_cell(a, x, y, &a->ptr_cx, &a->ptr_cy);
+	update_cursor_shape(a);
+}
+
+static void on_pointer_leave(void *ud)
+{
+	struct app *a = ud;
+	a->ptr_inside = false;
+}
+
+static void on_pointer_motion(void *ud, double x, double y)
+{
+	struct app *a = ud;
+	int cx, cy;
+	ptr_to_cell(a, x, y, &cx, &cy);
+	bool moved = (cx != a->ptr_cx || cy != a->ptr_cy);
+	a->ptr_cx = cx;
+	a->ptr_cy = cy;
+	if (!moved)
+		return;
+	if (a->sel.dragging) {
+		tl_sel_update(&a->sel, &a->term, cx, view_abs_y(a, cy));
+		a->term.full_dirty = true;
+		a->term.dirty = true;
+		draw(a, false);
+		return;
+	}
+	if (mouse_reporting(a)) {
+		if (a->term.mouse_mode == TL_MOUSE_ANY ||
+		    (a->term.mouse_mode == TL_MOUSE_DRAG && a->ptr_buttons != 0)) {
+			int btn = (a->ptr_buttons & 1) ? 0 :
+				  (a->ptr_buttons & 2) ? 1 :
+				  (a->ptr_buttons & 4) ? 2 : 3;
+			send_mouse(a, 32 + btn, cx, cy, false);
+		}
+	}
+}
+
+static void on_pointer_button(void *ud, uint32_t button, bool pressed,
+	uint32_t time)
+{
+	struct app *a = ud;
+	int btn_idx = button == TL_BTN_LEFT ? 0 :
+		      button == TL_BTN_MIDDLE ? 1 :
+		      button == TL_BTN_RIGHT ? 2 : -1;
+	if (btn_idx >= 0) {
+		if (pressed)
+			a->ptr_buttons |= (1u << btn_idx);
+		else
+			a->ptr_buttons &= ~(1u << btn_idx);
+	}
+	if (mouse_reporting(a) && btn_idx >= 0) {
+		send_mouse(a, btn_idx, a->ptr_cx, a->ptr_cy, !pressed);
+		return;
+	}
+	if (button == TL_BTN_LEFT) {
+		if (pressed) {
+			if (time - a->last_click_time <= 400)
+				a->click_count = (a->click_count % 3) + 1;
+			else
+				a->click_count = 1;
+			a->last_click_time = time;
+			enum tl_sel_kind kind = a->click_count == 2 ? TL_SEL_WORD :
+				a->click_count == 3 ? TL_SEL_LINE : TL_SEL_CHAR;
+			tl_sel_start(&a->sel, &a->term, a->ptr_cx,
+				view_abs_y(a, a->ptr_cy), kind);
+			a->term.full_dirty = true;
+			a->term.dirty = true;
+			draw(a, false);
+		} else if (a->sel.dragging) {
+			tl_sel_end(&a->sel);
+			size_t len = 0;
+			char *text = tl_sel_extract(&a->term, &a->sel, &len);
+			if (text != NULL && len > 0)
+				tl_window_set_primary(&a->win, text, len);
+			free(text);
+		}
+	} else if (button == TL_BTN_MIDDLE && pressed) {
+		tl_term_reset_view(&a->term);
+		start_paste(a, true);
+	}
+}
+
+static void on_pointer_axis(void *ud, uint32_t axis, double value,
+	int32_t v120)
+{
+	struct app *a = ud;
+	if (axis != 0)
+		return;
+	double step = v120 != 0 ? (double)v120 / 120.0 : value / 15.0;
+	a->axis_acc += step;
+	int notches = (int)a->axis_acc;
+	if (notches == 0)
+		return;
+	a->axis_acc -= (double)notches;
+	if (mouse_reporting(a)) {
+		int cb = notches < 0 ? 64 : 65;
+		int count = notches < 0 ? -notches : notches;
+		for (int i = 0; i < count; i++)
+			send_mouse(a, cb, a->ptr_cx, a->ptr_cy, false);
+		return;
+	}
+	/* Negative axis is scroll up (into scrollback). */
+	tl_term_scroll_view(&a->term, -notches * 3);
+	draw(a, false);
 }
 
 static void on_focus_in(void *ud, const uint32_t *codes, size_t n)
@@ -345,6 +629,8 @@ static void on_repeat_info(void *ud, int32_t rate, int32_t delay)
 static const struct tl_window_events events = {
 	on_configure, on_close, on_frame, on_key, on_focus_in, on_focus_out,
 	on_modifiers, on_repeat_info, on_scale,
+	on_pointer_enter, on_pointer_leave, on_pointer_motion,
+	on_pointer_button, on_pointer_axis,
 };
 
 /* Read what the program wrote. Returns false at end of file. */
@@ -429,6 +715,7 @@ int main(int argc, char **argv)
 
 	setup_locale();
 	static struct app a;
+	a.paste_fd = -1;
 	char err[300];
 	tl_palette_default(&a.pal);
 	tl_kbd_init(&a.kbd);
@@ -486,6 +773,7 @@ int main(int argc, char **argv)
 			(void)tl_pty_queue(&a.pty, a.term.reply, a.term.reply_len);
 			a.term.reply_len = 0;
 		}
+		update_cursor_shape(&a);
 		if (a.term.dirty || a.need_draw)
 			draw(&a, false);
 
@@ -497,17 +785,18 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		struct pollfd fds[3] = {
+		struct pollfd fds[4] = {
 			{ tl_window_fd(&a.win), POLLIN | (wl_more ? POLLOUT : 0), 0 },
 			{ pty_open ? a.pty.master : -1,
 			  POLLIN | (pty_more ? POLLOUT : 0), 0 },
 			{ sigchld_pipe[0], POLLIN, 0 },
+			{ a.paste_fd, POLLIN, 0 },
 		};
 		int timeout = -1;
 		if (a.repeat_code != 0 && a.focused)
 			timeout = (int)ms_until(&a.repeat_at);
 
-		if (poll(fds, 3, timeout) < 0 && errno != EINTR) {
+		if (poll(fds, 4, timeout) < 0 && errno != EINTR) {
 			perror("tam-last: poll");
 			break;
 		}
@@ -533,6 +822,10 @@ int main(int argc, char **argv)
 				child_done = reap(&a, &status);
 		}
 
+		if (a.paste_fd >= 0 &&
+		    (fds[3].revents & (POLLIN | POLLHUP | POLLERR)))
+			drain_paste(&a);
+
 		if (a.repeat_code != 0 && a.focused &&
 		    ms_until(&a.repeat_at) == 0) {
 			send_key(&a, a.repeat_code);
@@ -546,6 +839,11 @@ int main(int argc, char **argv)
 				pty_open = read_pty(&a); /* its last words */
 			if (!child_done)
 				child_done = reap(&a, &status);
+			if (!child_done) {
+				struct pollfd sp = { sigchld_pipe[0], POLLIN, 0 };
+				if (poll(&sp, 1, 50) > 0)
+					child_done = reap(&a, &status);
+			}
 			if (a.term.dirty)
 				draw(&a, true);
 			(void)tl_window_flush(&a.win);
@@ -555,6 +853,8 @@ int main(int argc, char **argv)
 
 	if (!child_done)
 		kill(-a.pty.pid, SIGHUP);
+	if (a.paste_fd >= 0)
+		close(a.paste_fd);
 	free(a.buf_dirty[0]);
 	free(a.buf_dirty[1]);
 	tl_window_close(&a.win);

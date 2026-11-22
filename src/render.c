@@ -87,10 +87,14 @@ static void draw_glyph(struct tl_font *f, uint32_t cp, int span, uint32_t fg,
 
 void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
-	int pad, bool focused, const bool *rows, bool full)
+	int pad, bool focused, const struct tl_sel *sel, const bool *rows,
+	bool full)
 {
 	int cw = f->cell_w, ch = f->cell_h;
 	int line_h = ch / 14 > 0 ? ch / 14 : 1;
+	int sb = t->alt_screen ? 0 : t->sb_len;
+	int view_off = t->alt_screen ? 0 : t->view_offset;
+	bool show_cursor = t->cursor_visible && view_off == 0;
 
 	/* Margins and the leftover strip right and below the grid. */
 	if (full)
@@ -99,17 +103,25 @@ void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 	for (int y = 0; y < t->rows; y++) {
 		if (!full && rows != NULL && !rows[y])
 			continue;
+		int row_cols = 0;
+		const struct tl_cell *row = tl_term_view_row(t, y, &row_cols);
+		int abs_y = sb - view_off + y;
 		for (int x = 0; x < t->cols; x++) {
-			const struct tl_cell *c = tl_term_cell(t, x, y);
+			static const struct tl_cell blank_cell = {
+				' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0
+			};
+			const struct tl_cell *c = (row != NULL && x < row_cols) ?
+				&row[x] : &blank_cell;
 			if (c->cp == TL_CELL_WIDE_TAIL)
 				continue;
-			int span = x + 1 < t->cols &&
-				tl_term_cell(t, x + 1, y)->cp == TL_CELL_WIDE_TAIL ? 2 : 1;
+			int span = (row != NULL && x + 1 < t->cols && x + 1 < row_cols &&
+				row[x + 1].cp == TL_CELL_WIDE_TAIL) ? 2 : 1;
 			uint32_t fg = tl_color_resolve(pal, c->fg, true);
 			uint32_t bg = tl_color_resolve(pal, c->bg, false);
-			bool cursor_here = t->cursor_visible && focused &&
+			bool cursor_here = show_cursor && focused &&
 				x == t->cx && y == t->cy;
-			if (c->attrs & TL_ATTR_INVERSE) {
+			bool selected = sel != NULL && tl_sel_contains(sel, x, abs_y);
+			if (((c->attrs & TL_ATTR_INVERSE) != 0) ^ selected) {
 				uint32_t tmp = fg; fg = bg; bg = tmp;
 			}
 			if (cursor_here && t->cursor_style == TL_CURSOR_BLOCK) {
@@ -141,7 +153,7 @@ void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 					ch, pal->cursor);
 		}
 		/* Unfocused (or over a wide tail): an outline box. */
-		if (t->cursor_visible && !focused && y == t->cy &&
+		if (show_cursor && !focused && y == t->cy &&
 		    t->cx < t->cols && t->cy < t->rows) {
 			int x0 = pad + t->cx * cw, y0 = pad + t->cy * ch;
 			rect(pixels, width, height, x0, y0, cw, 1, pal->cursor);
@@ -156,5 +168,6 @@ void tl_render(const struct tl_term *t, struct tl_font *f,
 	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
 	int pad, bool focused)
 {
-	tl_render_rows(t, f, pal, pixels, width, height, pad, focused, NULL, true);
+	tl_render_rows(t, f, pal, pixels, width, height, pad, focused, NULL,
+		NULL, true);
 }

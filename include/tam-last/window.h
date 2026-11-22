@@ -27,15 +27,43 @@ struct tl_window_events {
 	/* The compositor's preferred scale for this window, in 120ths:
 	 * 120 is 1, 150 is 1.25. Only sent when fractional scaling works. */
 	void (*scale)(void *ud, uint32_t scale120);
+	/* Pointer events (x, y in logical pixels). */
+	void (*pointer_enter)(void *ud, double x, double y);
+	void (*pointer_leave)(void *ud);
+	void (*pointer_motion)(void *ud, double x, double y);
+	void (*pointer_button)(void *ud, uint32_t button, bool pressed,
+		uint32_t time);
+	void (*pointer_axis)(void *ud, uint32_t axis, double value,
+		int32_t v120);
 };
 
 struct tl_window {
 	struct tl_wire wire;
 	uint32_t registry, compositor, shm, seat, wm_base;
 	uint32_t viewporter, fractional_manager, viewport, fractional;
+	uint32_t cursor_shape_mgr, cursor_shape_dev;
+	uint32_t data_mgr, data_device;
+	uint32_t primary_mgr, primary_device;
 	int dest_w, dest_h; /* the viewport destination last set */
-	uint32_t surface, xdg_surface, toplevel, keyboard, frame_cb, sync_cb;
+	uint32_t surface, xdg_surface, toplevel, keyboard, pointer;
+	uint32_t frame_cb, sync_cb;
 	uint32_t seat_version;
+	uint32_t last_serial;
+	uint32_t pointer_enter_serial;
+	uint32_t cursor_shape;
+	/* Pending pointer axis frame accumulator. */
+	bool axis_pending[2];
+	double axis_val[2];
+	int32_t axis_v120[2];
+	/* Clipboard and primary selection state. */
+	uint32_t pending_clip_offer, clip_offer, clip_source;
+	char pending_clip_mime[64], clip_mime[64];
+	char *clip_text;
+	size_t clip_len;
+	uint32_t pending_prim_offer, prim_offer, prim_source;
+	char pending_prim_mime[64], prim_mime[64];
+	char *prim_text;
+	size_t prim_len;
 	bool synced;
 	bool configured;
 	int pending_w, pending_h;
@@ -75,5 +103,13 @@ void tl_window_present_damage(struct tl_window *win, struct tl_buffer *b,
 /* True when the window can draw at a fractional scale. */
 bool tl_window_can_scale(const struct tl_window *win);
 bool tl_window_frame_pending(const struct tl_window *win);
+
+void tl_window_set_cursor(struct tl_window *win, uint32_t shape);
+void tl_window_set_clipboard(struct tl_window *win, const char *text,
+	size_t len);
+void tl_window_set_primary(struct tl_window *win, const char *text, size_t len);
+/* Start receiving clipboard or primary selection into a non-blocking pipe.
+ * Returns the read fd, or -1 if no selection is available. */
+int tl_window_paste(struct tl_window *win, bool primary);
 
 #endif

@@ -1,0 +1,42 @@
+W7 SCROLLBACK AND THE POINTER (0.0.4)
+
+Date: 2026-11-21
+AI harness: agy 1.5.14
+AI model: Gemini 4 Hydrogen (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next slice of work for tam-last."
+  Fred: "Approved. Proceed."
+
+
+DONE
+
+  - Scrollback in 64-row pages capped at 4096 rows in term.c/term.h,
+    with tl_term_abs_row, tl_term_view_row, tl_term_scroll_view, and
+    ED 3 clearing scrollback.
+  - Selection module (include/tam-last/select.h, src/select.c) for
+    char/word/line selection and UTF-8 extraction; render.c updated to
+    render scrollback and invert selected cells.
+  - Wayland wire support for server-allocated object ids (>= 0xff000000),
+    wl_pointer, wp_cursor_shape_v1, wl_data_device, and
+    zwp_primary_selection_v1 (protocols/ XMLs added, opcodes checked in
+    tests/test_wire.c).
+  - Mouse reporting (1000, 1002, 1003, SGR 1006) with Shift bypass,
+    bracketed paste (2004), Ctrl+Shift+C/V, Shift+Insert, middle-click
+    primary paste, and Shift+PgUp/PgDn in src/main.c.
+  - Fixed a child-exit race in src/main.c where !pty_open could break
+    before SIGCHLD was reaped under ASan.
+  - Bumped VERSION to 0.0.4. Verified make test, make sanitize (including
+    headless tam-pane), and readelf -d (libc.so.6 and libm.so.6 only).
+
+
+FAILED
+
+  - Nothing.
+
+
+HANDOFF
+
+  - Fred tries 0.0.4 on DP-2 (scale 1.25); next milestone is 0.0.5.

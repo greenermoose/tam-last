@@ -152,6 +152,21 @@ void tl_buffer_destroy(struct tl_wire *w, uint32_t buffer)
 	tl_wire_zombie(w, buffer);
 }
 
+uint32_t tl_seat_get_pointer(struct tl_wire *w, uint32_t seat, void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_POINTER, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	return send_new(w, seat, 0, &m, id);
+}
+
+void tl_pointer_release(struct tl_wire *w, uint32_t pointer)
+{
+	send0(w, pointer, 1);
+	tl_wire_zombie(w, pointer);
+}
+
 uint32_t tl_seat_get_keyboard(struct tl_wire *w, uint32_t seat, void *data)
 {
 	struct tl_msg m;
@@ -167,6 +182,155 @@ void tl_keyboard_release(struct tl_wire *w, uint32_t keyboard)
 	 * must be taken from the queue, so the id keeps its interface until
 	 * delete_id. */
 	send0(w, keyboard, 0);
+}
+
+uint32_t tl_cursor_shape_get_pointer(struct tl_wire *w, uint32_t mgr,
+	uint32_t pointer, void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_CURSOR_SHAPE_DEV, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	tl_msg_u32(&m, pointer);
+	return send_new(w, mgr, 1, &m, id);
+}
+
+void tl_cursor_shape_set(struct tl_wire *w, uint32_t dev, uint32_t serial,
+	uint32_t shape)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_u32(&m, serial);
+	tl_msg_u32(&m, shape);
+	(void)tl_wire_send(w, dev, 1, &m);
+}
+
+void tl_cursor_shape_destroy(struct tl_wire *w, uint32_t dev)
+{
+	send0(w, dev, 0);
+	tl_wire_zombie(w, dev);
+}
+
+uint32_t tl_data_mgr_create_source(struct tl_wire *w, uint32_t mgr, void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_DATA_SOURCE, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	return send_new(w, mgr, 0, &m, id);
+}
+
+uint32_t tl_data_mgr_get_device(struct tl_wire *w, uint32_t mgr, uint32_t seat,
+	void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_DATA_DEVICE, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	tl_msg_u32(&m, seat);
+	return send_new(w, mgr, 1, &m, id);
+}
+
+void tl_data_device_set_selection(struct tl_wire *w, uint32_t dev,
+	uint32_t source, uint32_t serial)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_u32(&m, source);
+	tl_msg_u32(&m, serial);
+	(void)tl_wire_send(w, dev, 1, &m);
+}
+
+void tl_data_source_offer(struct tl_wire *w, uint32_t source, const char *mime)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_str(&m, mime);
+	(void)tl_wire_send(w, source, 0, &m);
+}
+
+void tl_data_source_destroy(struct tl_wire *w, uint32_t source)
+{
+	send0(w, source, 1);
+	tl_wire_zombie(w, source);
+}
+
+void tl_data_offer_receive(struct tl_wire *w, uint32_t offer, const char *mime,
+	int fd)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_str(&m, mime);
+	tl_msg_fd(&m, fd);
+	(void)tl_wire_send(w, offer, 1, &m);
+}
+
+void tl_data_offer_destroy(struct tl_wire *w, uint32_t offer)
+{
+	send0(w, offer, 2);
+	tl_wire_zombie(w, offer);
+}
+
+uint32_t tl_primary_mgr_create_source(struct tl_wire *w, uint32_t mgr,
+	void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_PRIMARY_SOURCE, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	return send_new(w, mgr, 0, &m, id);
+}
+
+uint32_t tl_primary_mgr_get_device(struct tl_wire *w, uint32_t mgr,
+	uint32_t seat, void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_PRIMARY_DEVICE, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	tl_msg_u32(&m, seat);
+	return send_new(w, mgr, 1, &m, id);
+}
+
+void tl_primary_device_set_selection(struct tl_wire *w, uint32_t dev,
+	uint32_t source, uint32_t serial)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_u32(&m, source);
+	tl_msg_u32(&m, serial);
+	(void)tl_wire_send(w, dev, 0, &m);
+}
+
+void tl_primary_source_offer(struct tl_wire *w, uint32_t source,
+	const char *mime)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_str(&m, mime);
+	(void)tl_wire_send(w, source, 0, &m);
+}
+
+void tl_primary_source_destroy(struct tl_wire *w, uint32_t source)
+{
+	send0(w, source, 1);
+	tl_wire_zombie(w, source);
+}
+
+void tl_primary_offer_receive(struct tl_wire *w, uint32_t offer,
+	const char *mime, int fd)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_str(&m, mime);
+	tl_msg_fd(&m, fd);
+	(void)tl_wire_send(w, offer, 0, &m);
+}
+
+void tl_primary_offer_destroy(struct tl_wire *w, uint32_t offer)
+{
+	send0(w, offer, 1);
+	tl_wire_zombie(w, offer);
 }
 
 void tl_wm_base_pong(struct tl_wire *w, uint32_t wm_base, uint32_t serial)

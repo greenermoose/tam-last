@@ -12,8 +12,11 @@
 #define TL_WIRE_BUF 16384
 #define TL_WIRE_FDS 28
 /* Object ids are reused after delete_id, so they stay small and an array
- * indexed by id is enough. */
+ * indexed by id is enough. Server-allocated ids (>= 0xff000000) live in
+ * a small table. */
 #define TL_WIRE_OBJECTS 1024
+#define TL_WIRE_SERVER_ID_START 0xff000000u
+#define TL_WIRE_SERVER_OBJECTS 64
 
 /* The interfaces tam-last speaks. TL_IF_NONE marks a free id. */
 enum tl_iface {
@@ -28,6 +31,7 @@ enum tl_iface {
 	TL_IF_BUFFER,
 	TL_IF_SEAT,
 	TL_IF_KEYBOARD,
+	TL_IF_POINTER,
 	TL_IF_WM_BASE,
 	TL_IF_XDG_SURFACE,
 	TL_IF_XDG_TOPLEVEL,
@@ -35,6 +39,16 @@ enum tl_iface {
 	TL_IF_VIEWPORT,
 	TL_IF_FRACTIONAL_MANAGER,
 	TL_IF_FRACTIONAL_SCALE,
+	TL_IF_CURSOR_SHAPE_MGR,
+	TL_IF_CURSOR_SHAPE_DEV,
+	TL_IF_DATA_DEVICE_MGR,
+	TL_IF_DATA_DEVICE,
+	TL_IF_DATA_SOURCE,
+	TL_IF_DATA_OFFER,
+	TL_IF_PRIMARY_MGR,
+	TL_IF_PRIMARY_DEVICE,
+	TL_IF_PRIMARY_SOURCE,
+	TL_IF_PRIMARY_OFFER,
 	/* Destroyed by us, waiting for the server's delete_id. */
 	TL_IF_ZOMBIE
 };
@@ -56,6 +70,10 @@ struct tl_wire {
 	int out_fds[TL_WIRE_FDS];
 	size_t out_nfds;
 	struct tl_object objects[TL_WIRE_OBJECTS];
+	struct {
+		uint32_t id;
+		struct tl_object obj;
+	} server_objects[TL_WIRE_SERVER_OBJECTS];
 	uint32_t next_id;
 	bool failed;
 };
@@ -90,6 +108,9 @@ void tl_wire_close(struct tl_wire *w);
 
 /* Allocate a client object id for iface. Returns 0 when none are left. */
 uint32_t tl_wire_new_id(struct tl_wire *w, enum tl_iface iface, void *data);
+/* Register a server-created object id (>= TL_WIRE_SERVER_ID_START). */
+void tl_wire_server_id(struct tl_wire *w, uint32_t id, enum tl_iface iface,
+	void *data);
 /* The server confirmed the id is gone (wl_display.delete_id). */
 void tl_wire_free_id(struct tl_wire *w, uint32_t id);
 /* We destroyed the object; ignore its events until delete_id. */

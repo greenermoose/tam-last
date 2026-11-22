@@ -101,11 +101,35 @@ uint32_t tl_wire_new_id(struct tl_wire *w, enum tl_iface iface, void *data)
 	return 0;
 }
 
+void tl_wire_server_id(struct tl_wire *w, uint32_t id, enum tl_iface iface,
+	void *data)
+{
+	if (id < TL_WIRE_SERVER_ID_START)
+		return;
+	for (size_t i = 0; i < TL_WIRE_SERVER_OBJECTS; i++) {
+		if (w->server_objects[i].id == 0 || w->server_objects[i].id == id) {
+			w->server_objects[i].id = id;
+			w->server_objects[i].obj.iface = iface;
+			w->server_objects[i].obj.data = data;
+			return;
+		}
+	}
+}
+
 void tl_wire_free_id(struct tl_wire *w, uint32_t id)
 {
 	if (id >= 2 && id < TL_WIRE_OBJECTS) {
 		w->objects[id].iface = TL_IF_NONE;
 		w->objects[id].data = NULL;
+	} else if (id >= TL_WIRE_SERVER_ID_START) {
+		for (size_t i = 0; i < TL_WIRE_SERVER_OBJECTS; i++) {
+			if (w->server_objects[i].id == id) {
+				w->server_objects[i].id = 0;
+				w->server_objects[i].obj.iface = TL_IF_NONE;
+				w->server_objects[i].obj.data = NULL;
+				return;
+			}
+		}
 	}
 }
 
@@ -114,14 +138,31 @@ void tl_wire_zombie(struct tl_wire *w, uint32_t id)
 	if (id >= 2 && id < TL_WIRE_OBJECTS) {
 		w->objects[id].iface = TL_IF_ZOMBIE;
 		w->objects[id].data = NULL;
+	} else if (id >= TL_WIRE_SERVER_ID_START) {
+		for (size_t i = 0; i < TL_WIRE_SERVER_OBJECTS; i++) {
+			if (w->server_objects[i].id == id) {
+				w->server_objects[i].id = 0;
+				w->server_objects[i].obj.iface = TL_IF_NONE;
+				w->server_objects[i].obj.data = NULL;
+				return;
+			}
+		}
 	}
 }
 
 const struct tl_object *tl_wire_object(const struct tl_wire *w, uint32_t id)
 {
-	if (id == 0 || id >= TL_WIRE_OBJECTS)
+	if (id == 0)
 		return NULL;
-	return &w->objects[id];
+	if (id < TL_WIRE_OBJECTS)
+		return &w->objects[id];
+	if (id >= TL_WIRE_SERVER_ID_START) {
+		for (size_t i = 0; i < TL_WIRE_SERVER_OBJECTS; i++) {
+			if (w->server_objects[i].id == id)
+				return &w->server_objects[i].obj;
+		}
+	}
+	return NULL;
 }
 
 void tl_msg_init(struct tl_msg *m)

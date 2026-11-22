@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "check.h"
+#include "tam-last/select.h"
 #include "tam-last/term.h"
 
 static struct tl_term t;
@@ -250,6 +251,54 @@ int main(void)
 	t.dirty = false;
 	feed("\033[2;1Hx");
 	CHECK(t.dirty && !t.full_dirty && !t.dirty_rows[0] && t.dirty_rows[1]);
+
+	/* Mouse reporting and bracketed paste modes (1000, 1002, 1003, 1006, 2004). */
+	feed("\033[?1000h");
+	CHECK(t.mouse_mode == TL_MOUSE_X10);
+	feed("\033[?1002h\033[?1006h\033[?2004h");
+	CHECK(t.mouse_mode == TL_MOUSE_DRAG && t.mouse_sgr && t.bracketed_paste);
+	feed("\033[?1003h");
+	CHECK(t.mouse_mode == TL_MOUSE_ANY);
+	feed("\033[?1003l\033[?1006l\033[?2004l");
+	CHECK(t.mouse_mode == TL_MOUSE_NONE && !t.mouse_sgr && !t.bracketed_paste);
+
+	/* Scrollback pages, view_offset, ED 3, and selection extraction. */
+	tl_term_free(&t);
+	CHECK(tl_term_init(&t, 12, 3) == 0);
+	feed("alpha beta\r\ngamma\r\ndelta\r\nepsilon");
+	CHECK(t.sb_len == 1);
+	int ncols = 0;
+	const struct tl_cell *r0 = tl_term_abs_row(&t, 0, &ncols);
+	CHECK(r0 != NULL && ncols == 12 && r0[0].cp == 'a');
+	tl_term_scroll_view(&t, 1);
+	CHECK(t.view_offset == 1);
+	CHECK(tl_term_view_row(&t, 0, &ncols)[0].cp == 'a');
+	tl_term_reset_view(&t);
+	CHECK(t.view_offset == 0);
+
+	/* Word, line, and char selection extraction. */
+	struct tl_sel sel;
+	tl_sel_start(&sel, &t, 7, 0, TL_SEL_WORD); /* "beta" on abs_y 0 */
+	tl_sel_end(&sel);
+	size_t slen = 0;
+	char *stext = tl_sel_extract(&t, &sel, &slen);
+	CHECK(stext != NULL && strcmp(stext, "beta") == 0 && slen == 4);
+	free(stext);
+
+	tl_sel_start(&sel, &t, 2, 1, TL_SEL_LINE);
+	tl_sel_end(&sel);
+	stext = tl_sel_extract(&t, &sel, &slen);
+	CHECK(stext != NULL && strcmp(stext, "gamma") == 0);
+	free(stext);
+
+	/* ED 3 clears scrollback. */
+	feed("\033[3J");
+	CHECK(t.sb_len == 0 && t.view_offset == 0);
+
+	/* Scrollback cap eviction (TL_SB_MAX_ROWS). */
+	for (int i = 0; i < TL_SB_MAX_ROWS + 200; i++)
+		feed("\r\nx");
+	CHECK(t.sb_len <= TL_SB_MAX_ROWS + TL_SB_PAGE_ROWS);
 
 	/* Garbage never breaks the invariants. */
 	srand(1);

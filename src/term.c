@@ -74,6 +74,68 @@ static void clear_grid(struct tl_cell *cells, int cols, int rows)
 		cells[i] = b;
 }
 
+static void sb_clear(struct tl_term *t)
+{
+	for (int i = 0; i < t->sb_count; i++) {
+		int idx = (t->sb_head + i) % TL_SB_RING_CAP;
+		free(t->sb_pages[idx].cells);
+		t->sb_pages[idx].cells = NULL;
+		t->sb_pages[idx].cols = 0;
+		t->sb_pages[idx].used = 0;
+	}
+	t->sb_head = 0;
+	t->sb_count = 0;
+	t->sb_len = 0;
+	t->view_offset = 0;
+}
+
+static void sb_push_row(struct tl_term *t, const struct tl_cell *row)
+{
+	struct tl_sb_page *tail = NULL;
+	if (t->sb_count > 0) {
+		int idx = (t->sb_head + t->sb_count - 1) % TL_SB_RING_CAP;
+		tail = &t->sb_pages[idx];
+	}
+	if (tail == NULL || tail->used >= TL_SB_PAGE_ROWS || tail->cols != t->cols) {
+		if (t->sb_count == TL_SB_RING_CAP) {
+			struct tl_sb_page *old = &t->sb_pages[t->sb_head];
+			t->sb_len -= old->used;
+			free(old->cells);
+			old->cells = NULL;
+			t->sb_head = (t->sb_head + 1) % TL_SB_RING_CAP;
+			t->sb_count--;
+		}
+		int idx = (t->sb_head + t->sb_count) % TL_SB_RING_CAP;
+		tail = &t->sb_pages[idx];
+		tail->cells = malloc((size_t)TL_SB_PAGE_ROWS * (size_t)t->cols *
+			sizeof(*tail->cells));
+		if (tail->cells == NULL)
+			return;
+		tail->cols = t->cols;
+		tail->used = 0;
+		t->sb_count++;
+	}
+	memcpy(tail->cells + (size_t)tail->used * (size_t)tail->cols, row,
+		(size_t)t->cols * sizeof(*row));
+	tail->used++;
+	t->sb_len++;
+	if (t->view_offset > 0)
+		t->view_offset++;
+	/* Evict oldest page once total exceeds TL_SB_MAX_ROWS. */
+	while (t->sb_count > 0) {
+		struct tl_sb_page *old = &t->sb_pages[t->sb_head];
+		if (t->sb_len - old->used < TL_SB_MAX_ROWS)
+			break;
+		t->sb_len -= old->used;
+		free(old->cells);
+		old->cells = NULL;
+		t->sb_head = (t->sb_head + 1) % TL_SB_RING_CAP;
+		t->sb_count--;
+	}
+	if (t->view_offset > t->sb_len)
+		t->view_offset = t->sb_len;
+}
+
 static void reset(struct tl_term *t)
 {
 	if (t->alt_screen) {
@@ -82,6 +144,7 @@ static void reset(struct tl_term *t)
 		t->alt_cells = tmp;
 		t->alt_screen = false;
 	}
+	sb_clear(t);
 	t->pen = (struct tl_pen){ TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0 };
 	t->cx = t->cy = 0;
 	t->scroll_top = 0;
@@ -95,6 +158,9 @@ static void reset(struct tl_term *t)
 	t->autowrap = true;
 	t->app_cursor = false;
 	t->app_keypad = false;
+	t->mouse_mode = TL_MOUSE_NONE;
+	t->mouse_sgr = false;
+	t->bracketed_paste = false;
 	t->saved = (struct tl_saved){ 0, 0, false, false, false, t->pen };
 	t->alt_saved = t->saved;
 	fill_rows(t, 0, t->rows);
@@ -125,6 +191,7 @@ int tl_term_init(struct tl_term *t, int cols, int rows)
 
 void tl_term_free(struct tl_term *t)
 {
+	sb_clear(t);
 	free(t->cells);
 	free(t->alt_cells);
 	free(t->dirty_rows);
@@ -198,6 +265,8 @@ int tl_term_resize(struct tl_term *t, int cols, int rows)
 	t->wrap_next = false;
 	t->scroll_top = 0;
 	t->scroll_bottom = rows - 1;
+	if (t->view_offset > t->sb_len)
+		t->view_offset = t->sb_len;
 	if (t->saved.cx >= cols)
 		t->saved.cx = cols - 1;
 	if (t->saved.cy >= rows)
@@ -221,10 +290,17 @@ static void scroll_up(struct tl_term *t, int top, int bot, int n)
 		n = count;
 	if (n <= 0)
 		return;
+	if (!t->alt_screen && top == 0 && bot == t->rows - 1) {
+		for (int i = 0; i < n; i++)
+			sb_push_row(t, tl_term_cell(t, 0, i));
+	}
 	memmove(tl_term_cell(t, 0, top), tl_term_cell(t, 0, top + n),
 		(size_t)(count - n) * (size_t)t->cols * sizeof(struct tl_cell));
 	fill_rows(t, bot - n + 1, bot + 1);
-	mark_rows(t, top, bot + 1);
+	if (t->view_offset > 0)
+		mark_all(t);
+	else
+		mark_rows(t, top, bot + 1);
 }
 
 static void scroll_down(struct tl_term *t, int top, int bot, int n)
@@ -584,6 +660,7 @@ static void switch_screen(struct tl_term *t, bool alt, bool clear_alt,
 	t->alt_saved = tmp_saved;
 
 	t->alt_screen = alt;
+	t->view_offset = 0;
 	t->scroll_top = 0;
 	t->scroll_bottom = t->rows - 1;
 	if (alt && clear_alt)
@@ -615,6 +692,20 @@ static void dec_mode(struct tl_term *t, const struct tl_csi *c, bool on)
 			break;
 		case 1049:
 			switch_screen(t, on, true, true);
+			break;
+		case 1000:
+		case 1002:
+		case 1003:
+			if (on)
+				t->mouse_mode = (enum tl_mouse_mode)c->p[i];
+			else if ((int)t->mouse_mode == c->p[i])
+				t->mouse_mode = TL_MOUSE_NONE;
+			break;
+		case 1006:
+			t->mouse_sgr = on;
+			break;
+		case 2004:
+			t->bracketed_paste = on;
 			break;
 		default: break;
 		}
@@ -693,7 +784,13 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 			fill_rows(t, 0, t->cy);
 			fill(t, 0, t->cy, t->cx + 1);
 			break;
-		case 2: case 3:
+		case 2:
+			fill_rows(t, 0, t->rows);
+			mark_all(t);
+			break;
+		case 3:
+			if (!t->alt_screen)
+				sb_clear(t);
 			fill_rows(t, 0, t->rows);
 			mark_all(t);
 			break;
@@ -764,4 +861,70 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 void tl_term_feed(struct tl_term *t, const void *data, size_t len)
 {
 	tl_vt_feed(&t->vt, t, data, len);
+}
+
+void tl_term_scroll_view(struct tl_term *t, int delta)
+{
+	if (t->alt_screen || t->sb_len == 0) {
+		t->view_offset = 0;
+		return;
+	}
+	int next = t->view_offset + delta;
+	if (next < 0)
+		next = 0;
+	if (next > t->sb_len)
+		next = t->sb_len;
+	if (next != t->view_offset) {
+		t->view_offset = next;
+		mark_all(t);
+	}
+}
+
+void tl_term_reset_view(struct tl_term *t)
+{
+	if (t->view_offset != 0) {
+		t->view_offset = 0;
+		mark_all(t);
+	}
+}
+
+const struct tl_cell *tl_term_abs_row(const struct tl_term *t, int abs_y,
+	int *out_cols)
+{
+	int sb = t->alt_screen ? 0 : t->sb_len;
+	if (abs_y < 0 || abs_y >= sb + t->rows) {
+		*out_cols = 0;
+		return NULL;
+	}
+	if (abs_y < sb) {
+		int rem = abs_y;
+		for (int i = 0; i < t->sb_count; i++) {
+			int idx = (t->sb_head + i) % TL_SB_RING_CAP;
+			const struct tl_sb_page *p = &t->sb_pages[idx];
+			if (rem < p->used) {
+				*out_cols = p->cols;
+				return p->cells + (size_t)rem * (size_t)p->cols;
+			}
+			rem -= p->used;
+		}
+		*out_cols = 0;
+		return NULL;
+	}
+	*out_cols = t->cols;
+	return tl_term_cell(t, 0, abs_y - sb);
+}
+
+const struct tl_cell *tl_term_view_row(const struct tl_term *t, int y,
+	int *out_cols)
+{
+	if (t->alt_screen || t->view_offset == 0) {
+		if (y < 0 || y >= t->rows) {
+			*out_cols = 0;
+			return NULL;
+		}
+		*out_cols = t->cols;
+		return tl_term_cell(t, 0, y);
+	}
+	int abs_y = t->sb_len - t->view_offset + y;
+	return tl_term_abs_row(t, abs_y, out_cols);
 }

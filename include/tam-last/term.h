@@ -33,6 +33,23 @@ enum tl_cursor_style {
 	TL_CURSOR_BAR
 };
 
+enum tl_mouse_mode {
+	TL_MOUSE_NONE = 0,
+	TL_MOUSE_X10 = 1000,
+	TL_MOUSE_DRAG = 1002,
+	TL_MOUSE_ANY = 1003
+};
+
+#define TL_SB_PAGE_ROWS 64
+#define TL_SB_MAX_ROWS 4096
+#define TL_SB_RING_CAP 128
+
+struct tl_sb_page {
+	struct tl_cell *cells;
+	int cols;
+	int used;
+};
+
 /* The right half of a wide character. */
 #define TL_CELL_WIDE_TAIL 0xFFFFFFFFu
 #define TL_CELL_COMB_MAX 2
@@ -77,6 +94,14 @@ struct tl_term {
 	bool autowrap;
 	bool app_cursor; /* DECCKM: cursor keys send SS3 */
 	bool app_keypad; /* DECKPAM */
+	enum tl_mouse_mode mouse_mode; /* 1000, 1002, 1003 */
+	bool mouse_sgr; /* 1006 */
+	bool bracketed_paste; /* 2004 */
+	struct tl_sb_page sb_pages[TL_SB_RING_CAP];
+	int sb_head;
+	int sb_count;
+	int sb_len; /* total rows in scrollback */
+	int view_offset; /* 0 = live bottom, >0 = scrolled up */
 	bool dirty;
 	bool full_dirty;
 	bool *dirty_rows;
@@ -93,6 +118,18 @@ void tl_term_free(struct tl_term *t);
 int tl_term_resize(struct tl_term *t, int cols, int rows);
 /* Feed what the program wrote. */
 void tl_term_feed(struct tl_term *t, const void *data, size_t len);
+
+/* Scrollback navigation (primary screen only). */
+void tl_term_scroll_view(struct tl_term *t, int delta);
+void tl_term_reset_view(struct tl_term *t);
+
+/* Row pointer for an absolute line index (0 = oldest scrollback row,
+ * sb_len .. sb_len + rows - 1 = live screen). Sets *out_cols. */
+const struct tl_cell *tl_term_abs_row(const struct tl_term *t, int abs_y,
+	int *out_cols);
+/* Row pointer for visible row y (0..rows-1) accounting for view_offset. */
+const struct tl_cell *tl_term_view_row(const struct tl_term *t, int y,
+	int *out_cols);
 
 static inline struct tl_cell *tl_term_cell(const struct tl_term *t, int x,
 	int y)

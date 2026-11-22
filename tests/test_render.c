@@ -80,8 +80,22 @@ int main(int argc, char **argv)
 	/* Partial tl_render_rows: only row 1 drawn, row 0 left as sentinel. */
 	px[pad * w + pad] = 0x123456;
 	bool only_row1[2] = { false, true };
-	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, only_row1, false);
+	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, NULL, only_row1, false);
 	CHECK(px[pad * w + pad] == 0x123456);
+
+	/* Selection highlights by inverting fg and bg. */
+	struct tl_sel sel;
+	tl_sel_start(&sel, &t, 0, 0, TL_SEL_CHAR);
+	tl_sel_end(&sel);
+	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, &sel, NULL, true);
+	CHECK(px[cy * w + pad + font.cell_w / 2] == pal.bg);
+
+	/* Scrollback rendering hides the live cursor and shows history. */
+	feed(&t, "\r\nbc\r\nde");
+	CHECK(t.sb_len == 1);
+	tl_term_scroll_view(&t, 1);
+	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, NULL, NULL, true);
+	CHECK(px[cy * w + pad + font.cell_w / 2] == pal.index[1]);
 	free(px);
 	tl_term_free(&t);
 	tl_font_close(&font);

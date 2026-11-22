@@ -3,39 +3,42 @@ WHATNOW
 What tamlinux is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-21, with W6
+Updated: 2026-11-21, with W7
 
 
 STATE
 
-  Version 0.0.3 on branch dev (uncommitted working tree, ready for Fred's
-  trial). Full-screen program support is implemented and verified against
-  the automated checks:
-  - Scroll regions (DECSTBM), origin mode (DECOM), insert mode (IRM).
-  - Alternate screen (47, 1047, 1049) with a second grid and its own
-    saved cursor; tl_term_resize handles both grids.
-  - DEC special graphics (ESC ( 0 / ESC ( B), combining characters stored
-    with their base cell, and cursor styles (DECSCUSR: block, underline,
-    bar).
-  - Per-buffer row damage tracking with coalesced wl_surface_damage_buffer
-    rectangles.
+  Version 0.0.4 on branch dev (uncommitted working tree, ready for Fred's
+  trial). Scrollback and pointer support are implemented and verified:
+  - Scrollback in 64-row pages capped at 4096 rows (primary screen),
+    navigated with wheel and Shift+PgUp/PgDn; ED 3 clears scrollback.
+  - wl_pointer and optional wp_cursor_shape_v1 (text I-beam in normal
+    mode, default arrow in mouse reporting mode).
+  - Text selection (drag, double-click word, triple-click line) with
+    inverted cell rendering and UTF-8 extraction.
+  - Clipboard (wl_data_device) and optional primary selection
+    (zwp_primary_selection_v1): Ctrl+Shift+C/V, Shift+Insert, middle
+    click, and bracketed paste (DECSET 2004).
+  - Mouse reporting (1000, 1002, 1003, SGR 1006) with Shift bypass.
 
-  make clean && make, make test (with libtam include path), ASan/UBSan
-  sanitize tests, headless tam-pane check, and readelf -d (libc and libm
-  only) all pass.
+  make test (test_wire 114, test_vt 297, test_ttf 3036, test_keys 78,
+  test_render 25, version 0.0.4, headless tam-pane), ASan/UBSan sanitize
+  tests, and readelf -d (libc and libm only) all pass.
 
 
 NEXT
 
-  1. Fred tries vim, htop, less and yazi in build/tam-last (or installed
-     via make install) on DP-2 (scale 1.25) to accept 0.0.3.
-  2. Next milestone: 0.0.4 (scrollback, pointer/wheel, selection,
-     clipboard/primary selection, bracketed paste, mouse reporting).
+  1. Fred tries tam-last 0.0.4 on DP-2 (scale 1.25): scrollback (wheel,
+     Shift+PgUp/PgDn), selection (drag/word/line), clipboard/primary
+     paste, bracketed paste, and mouse reporting in htop/vim.
+  2. Next milestone: 0.0.5 (integer HiDPI preferred buffer scale,
+     bold/italic faces, fallback font, box-drawing/block/Braille glyphs
+     by code, tam_ini config).
 
 
 WAITING FOR FRED
 
-  - Trying vim, htop, less and yazi in tam-last 0.0.3.
+  - Trying tam-last 0.0.4 on DP-2 (scale 1.25).
   - Open points in the plans: TERM (P1); where layouts live and kitty
     decoding in libtam (P2).
 
@@ -44,12 +47,8 @@ WATCH OUT
 
   - Every code change bumps VERSION in the same commit (ROADMAP.md, "How
     a milestone is done"). Fred checks tam-last --version.
-  - New escape sequences get checks in tests/test_vt.c. Look at
-    build/tests/render-96dpi.ppm and render-120dpi.ppm by eye.
+  - New escape sequences get checks in tests/test_vt.c.
   - The headless check runs under tam-pane, which has no keyboard and
-    no fractional scaling. Never open windows on Fred's desktop; he
-    tries builds himself on DP-2 (scale 1.25).
+    no fractional scaling. Never open windows on Fred's desktop.
   - Bold and italic faces and the fallback font are 0.0.5; CJK shows the
     missing-glyph box until then.
-  - Licences: foot, st, havoc, ghostty, wezterm are MIT; kitty is GPL v3;
-    the Linux console is GPL v2 only, ideas only (UPSTREAM.md).

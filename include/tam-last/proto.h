@@ -19,6 +19,17 @@ enum {
 	TL_KEYBOARD_KEYMAP = 0, TL_KEYBOARD_ENTER = 1, TL_KEYBOARD_LEAVE = 2,
 	TL_KEYBOARD_KEY = 3, TL_KEYBOARD_MODIFIERS = 4,
 	TL_KEYBOARD_REPEAT_INFO = 5,
+	TL_POINTER_ENTER = 0, TL_POINTER_LEAVE = 1, TL_POINTER_MOTION = 2,
+	TL_POINTER_BUTTON = 3, TL_POINTER_AXIS = 4, TL_POINTER_FRAME = 5,
+	TL_POINTER_AXIS_SOURCE = 6, TL_POINTER_AXIS_STOP = 7,
+	TL_POINTER_AXIS_DISCRETE = 8, TL_POINTER_AXIS_VALUE120 = 9,
+	TL_DATA_OFFER_OFFER = 0,
+	TL_DATA_SOURCE_TARGET = 0, TL_DATA_SOURCE_SEND = 1,
+	TL_DATA_SOURCE_CANCELLED = 2,
+	TL_DATA_DEVICE_DATA_OFFER = 0, TL_DATA_DEVICE_SELECTION = 5,
+	TL_PRIMARY_OFFER_OFFER = 0,
+	TL_PRIMARY_SOURCE_SEND = 0, TL_PRIMARY_SOURCE_CANCELLED = 1,
+	TL_PRIMARY_DEVICE_DATA_OFFER = 0, TL_PRIMARY_DEVICE_SELECTION = 1,
 	TL_WM_BASE_PING = 0,
 	TL_XDG_SURFACE_CONFIGURE = 0,
 	TL_TOPLEVEL_CONFIGURE = 0, TL_TOPLEVEL_CLOSE = 1,
@@ -26,9 +37,12 @@ enum {
 	TL_FRACTIONAL_PREFERRED_SCALE = 0
 };
 
-/* wl_seat capability bits and wl_shm formats. */
+/* wl_seat capability bits, wl_shm formats, cursor shapes. */
+#define TL_SEAT_CAP_POINTER 1u
 #define TL_SEAT_CAP_KEYBOARD 2u
 #define TL_SHM_XRGB8888 1u
+#define TL_CURSOR_SHAPE_DEFAULT 1u
+#define TL_CURSOR_SHAPE_TEXT 9u
 
 uint32_t tl_display_sync(struct tl_wire *w, void *data);
 uint32_t tl_display_get_registry(struct tl_wire *w, void *data);
@@ -53,8 +67,43 @@ uint32_t tl_shm_pool_create_buffer(struct tl_wire *w, uint32_t pool,
 void tl_shm_pool_destroy(struct tl_wire *w, uint32_t pool);
 void tl_buffer_destroy(struct tl_wire *w, uint32_t buffer);
 
+uint32_t tl_seat_get_pointer(struct tl_wire *w, uint32_t seat, void *data);
+void tl_pointer_release(struct tl_wire *w, uint32_t pointer);
 uint32_t tl_seat_get_keyboard(struct tl_wire *w, uint32_t seat, void *data);
 void tl_keyboard_release(struct tl_wire *w, uint32_t keyboard);
+
+/* cursor-shape-v1. */
+uint32_t tl_cursor_shape_get_pointer(struct tl_wire *w, uint32_t mgr,
+	uint32_t pointer, void *data);
+void tl_cursor_shape_set(struct tl_wire *w, uint32_t dev, uint32_t serial,
+	uint32_t shape);
+void tl_cursor_shape_destroy(struct tl_wire *w, uint32_t dev);
+
+/* wl_data_device_manager: clipboard. */
+uint32_t tl_data_mgr_create_source(struct tl_wire *w, uint32_t mgr, void *data);
+uint32_t tl_data_mgr_get_device(struct tl_wire *w, uint32_t mgr, uint32_t seat,
+	void *data);
+void tl_data_device_set_selection(struct tl_wire *w, uint32_t dev,
+	uint32_t source, uint32_t serial);
+void tl_data_source_offer(struct tl_wire *w, uint32_t source, const char *mime);
+void tl_data_source_destroy(struct tl_wire *w, uint32_t source);
+void tl_data_offer_receive(struct tl_wire *w, uint32_t offer, const char *mime,
+	int fd);
+void tl_data_offer_destroy(struct tl_wire *w, uint32_t offer);
+
+/* zwp_primary_selection_device_manager_v1: primary selection. */
+uint32_t tl_primary_mgr_create_source(struct tl_wire *w, uint32_t mgr,
+	void *data);
+uint32_t tl_primary_mgr_get_device(struct tl_wire *w, uint32_t mgr,
+	uint32_t seat, void *data);
+void tl_primary_device_set_selection(struct tl_wire *w, uint32_t dev,
+	uint32_t source, uint32_t serial);
+void tl_primary_source_offer(struct tl_wire *w, uint32_t source,
+	const char *mime);
+void tl_primary_source_destroy(struct tl_wire *w, uint32_t source);
+void tl_primary_offer_receive(struct tl_wire *w, uint32_t offer,
+	const char *mime, int fd);
+void tl_primary_offer_destroy(struct tl_wire *w, uint32_t offer);
 
 void tl_wm_base_pong(struct tl_wire *w, uint32_t wm_base, uint32_t serial);
 uint32_t tl_wm_base_get_xdg_surface(struct tl_wire *w, uint32_t wm_base,
