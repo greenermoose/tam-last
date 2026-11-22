@@ -37,6 +37,10 @@ DONE
     play menu, demo-looks, demo-colors, demo-scrollback, demo-mouse,
     demo-fullscreen, demo-config, and theme-gruvbox.ini). Verified with
     sh -n, --in-term dry runs, and tam-idol/tools/idol-check.
+  - 0.0.6 fix found via sandbox/demo-fullscreen: shifted zero-advance
+    combining marks with x<=0 outlines by +cell_w in src/font/font.c so
+    accents render over the base cell instead of clipping off the left,
+    and fixed CRLF in raw mode in sandbox/demo-fullscreen.
 
 
 FAILED

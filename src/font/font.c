@@ -432,10 +432,24 @@ const struct tl_glyph *tl_font_glyph_styled(struct tl_font *f, uint32_t cp,
 			}
 		}
 		/* A malformed glyph draws as nothing rather than failing. */
-		if (tl_ttf_outline(ttf, g, &f->scratch) != 0 ||
-		    tl_raster(&f->scratch, sx, sy, gx, (float)f->baseline,
-			    mask, w, h) != 0)
+		if (tl_ttf_outline(ttf, g, &f->scratch) != 0) {
 			memset(mask, 0, (size_t)w * (size_t)h);
+		} else {
+			/* Zero-advance combining marks often have outlines left
+			 * of x=0 (for post-advance placement); shift into cell. */
+			if (tl_ttf_advance(ttf, g) == 0 &&
+			    f->scratch.npoints > 0) {
+				float xmax = f->scratch.x[0];
+				for (size_t p = 1; p < f->scratch.npoints; p++)
+					if (f->scratch.x[p] > xmax)
+						xmax = f->scratch.x[p];
+				if (xmax <= 0.0f)
+					gx += (float)w;
+			}
+			if (tl_raster(&f->scratch, sx, sy, gx,
+				    (float)f->baseline, mask, w, h) != 0)
+				memset(mask, 0, (size_t)w * (size_t)h);
+		}
 	}
 	f->slots[i] = (struct tl_glyph){ cp, span, style, mask };
 	f->used++;

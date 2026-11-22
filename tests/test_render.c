@@ -174,6 +174,15 @@ int main(int argc, char **argv)
 			CHECK(memcmp(gr->mask, gi->mask,
 				(size_t)font.cell_w * (size_t)font.cell_h) != 0);
 		}
+		/* Zero-advance combining mark (U+0301) must land inside the cell. */
+		{
+			const struct tl_glyph *gc = tl_font_glyph(&font, 0x0301, 1);
+			CHECK(gc != NULL);
+			int sum = 0;
+			for (int i = 0; i < font.cell_w * font.cell_h; i++)
+				sum += gc->mask[i];
+			CHECK(sum > 0);
+		}
 		CHECK(tl_term_init(&t, 64, 14) == 0);
 		feed(&t, "\033[32mfred@bosgame\033[0m:\033[34m~/Code/tamlinux/tam-last\033[0m$ ls --color\r\n"
 			"\033[1;34march\033[0m  \033[1;34mbuild\033[0m  COPYRIGHT  LICENSE  Makefile  README\r\n"

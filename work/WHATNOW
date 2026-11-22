@@ -8,7 +8,7 @@ Updated: 2026-11-22, with W8
 
 STATE
 
-  Version 0.0.5 on branch dev (Phase P1 foundation complete, ready for
+  Version 0.0.6 on branch dev (Phase P1 foundation complete, ready for
   Fred's trial). Implemented and verified:
   - Integer HiDPI fallback via wl_compositor v6
     wl_surface.preferred_buffer_scale and wl_surface.set_buffer_scale

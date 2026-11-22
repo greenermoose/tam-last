@@ -18,11 +18,11 @@ out = sys.stdout.write
 
 def draw_frame(style_name, style_code):
     out("\033[?1049h\033[2J\033[H")
-    out("\033[1;36m=== tam-last 0.0.3: Full-Screen, Scroll Region, Cursor Styles & DEC Gfx ===\033[0m\n")
-    out("  Keys: [1] Block cursor   [2] Underline cursor   [3] Bar cursor   [s] Scroll region   [q] Quit\n")
-    out("  DEC Special Graphics (ESC ( 0): \033(0lqqqqwqqqqk  x a ` f g ~ x  mqqqqvqqqqj\033(B\n")
-    out("  Combining marks: e\u0301  a\u0308  n\u0303  o\u0302\u0323  Z\u030a\n")
-    out("  \033[33m──── Scroll region (rows 7..14) stays bounded; header & footer stay fixed ────\033[0m\n")
+    out("\033[1;36m=== tam-last 0.0.3: Full-Screen, Scroll Region, Cursor Styles & DEC Gfx ===\033[0m\r\n")
+    out("  Keys: [1] Block cursor   [2] Underline cursor   [3] Bar cursor   [s] Scroll region   [q] Quit\r\n")
+    out("  DEC Special Graphics (ESC ( 0): \033(0lqqqqwqqqqk  x a ` f g ~ x  mqqqqvqqqqj\033(B\r\n")
+    out("  Combining marks: e\u0301  a\u0308  n\u0303  o\u0302\u0323  Z\u030a\r\n")
+    out("  \033[33m──── Scroll region (rows 7..14) stays bounded; header & footer stay fixed ────\033[0m\r\n")
     out("\033[16;1H\033[33m  ──── Footer (row 16): current cursor style = "
         f"\033[1m{style_name}\033[0;33m ────\033[0m")
     out("\033[7;14r")  # DECSTBM rows 7..14
