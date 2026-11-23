@@ -14,6 +14,7 @@ struct tl_config {
 	char font_bold_italic[512];
 	char font_fallback[512];
 	char layout[64];
+	char term[64];
 	float size;
 	int pad;
 	enum tl_osc52_policy osc52;

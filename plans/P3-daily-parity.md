@@ -1,6 +1,6 @@
 # P3: Daily parity with foot (0.2.x)
 
-**Status:** in progress (0.2.0 implemented).
+**Status:** in progress (0.2.0–0.2.1 implemented).
 
 ## Goal
 

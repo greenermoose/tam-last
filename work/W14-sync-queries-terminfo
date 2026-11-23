@@ -1,0 +1,57 @@
+W14 SYNCHRONIZED OUTPUT, DA2, XTVERSION, DECRQM, AND TERMINFO (0.2.1)
+
+Date: 2026-11-23
+AI harness: agy
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice of tam-last."
+  Fred: "1 yes, auto detect is fine / 2 1000 ms is fine / Plan approved. Proceed."
+  Fred: "Pass. Commit and finish."
+
+
+DONE
+
+  - Added DEC private mode 2026 (synchronized output) in
+    include/tam-last/term.h, src/term.c (CSI ? 2026 h/l and RIS reset),
+    and src/main.c (deferring non-forced draw() while sync_output is
+    active, with a 1000 ms CLOCK_MONOTONIC safety timeout and zero idle
+    poll wakeups when inactive).
+  - Added DA2 (CSI > c / CSI > 0 c -> \033[>1;<ver>;0c), XTVERSION
+    (CSI > q / CSI > 0 q -> \033P>|tam-last(<version>)\033\\), and
+    DECRQM for ANSI mode 4 (CSI Ps $ p) and all implemented DEC private
+    modes (CSI ? Ps $ p) in src/term.c.
+  - Authored terminfo/tam-last.ti defining tam-last (256-color + Tc)
+    and tam-last-direct (24-bit RGB) with extended capabilities (Sync,
+    RV/rv, XR/xr, Ms, Ss/Se, BD/BE/PS/PE, XM/xm, Cs/Cr, E3).
+  - Updated Makefile to compile and verify terminfo/tam-last.ti with
+    tic -x and infocmp -x, rebuild term.o on VERSION changes, and
+    install/uninstall terminfo under $(DESTDIR)$(TERMINFODIR).
+  - Added term= in include/tam-last/config.h and src/config.c, --term
+    in src/main.c, and TERM auto-detection in include/tam-last/pty.h
+    and src/pty.c (prefers tam-last when installed, sets TERMINFO_DIRS
+    for ~/.local/share/terminfo, falls back to xterm-256color).
+  - Expanded tests/test_vt.c (405 checks) and tests/test_config.c (55
+    checks).
+  - Added interactive sandbox/demo-queries (option b in sandbox/play
+    and documented in sandbox/README-sandbox).
+  - Bumped VERSION to 0.2.1 and updated plans/P3-daily-parity.md.
+  - Verified make clean && make (zero warnings), make test, make
+    sanitize (ASan/UBSan + headless tam-pane), readelf -d (libc and
+    libm only), sh -n, staged make install/uninstall, and idol-check.
+  - Fred tested and accepted tam-last 0.2.1 on 2026-11-23.
+
+
+FAILED
+
+  - None.
+
+
+HANDOFF
+
+  - Fred accepted 0.2.1 (synchronized output DEC 2026, DA2, XTVERSION,
+    DECRQM, and tam-last / tam-last-direct terminfo) on 2026-11-23.
+  - Next milestone is Phase P3, 0.2.2 (search in scrollback, URL mode,
+    desktop notifications; see plans/P3-daily-parity.md).

@@ -567,6 +567,96 @@ int main(void)
 	feed("\007");
 	CHECK(strcmp(t.title, "split") == 0);
 
+	/* --- DA2, XTVERSION, DEC 2026 synchronized output, and DECRQM --- */
+	fresh(20, 4);
+	{
+		int maj = 0, min = 0, pat = 0;
+		(void)sscanf(TL_VERSION, "%d.%d.%d", &maj, &min, &pat);
+		char want_da2[64];
+		snprintf(want_da2, sizeof(want_da2), "\033[>1;%d;0c",
+			maj * 10000 + min * 100 + pat);
+		feed("\033[>c");
+		CHECK(t.reply_len == strlen(want_da2) &&
+			memcmp(t.reply, want_da2, t.reply_len) == 0);
+		t.reply_len = 0;
+		feed("\033[>0c");
+		CHECK(t.reply_len == strlen(want_da2) &&
+			memcmp(t.reply, want_da2, t.reply_len) == 0);
+		t.reply_len = 0;
+		/* Non-zero DA2 parameter is ignored. */
+		feed("\033[>1c");
+		CHECK(t.reply_len == 0);
+
+		char want_xt[64];
+		snprintf(want_xt, sizeof(want_xt), "\033P>|tam-last(%s)\033\\",
+			TL_VERSION);
+		feed("\033[>q");
+		CHECK(t.reply_len == strlen(want_xt) &&
+			memcmp(t.reply, want_xt, t.reply_len) == 0);
+		t.reply_len = 0;
+		feed("\033[>0q");
+		CHECK(t.reply_len == strlen(want_xt) &&
+			memcmp(t.reply, want_xt, t.reply_len) == 0);
+		t.reply_len = 0;
+		feed("\033[>1q");
+		CHECK(t.reply_len == 0);
+	}
+
+	/* DEC 2026 synchronized output + RIS reset. */
+	CHECK(!t.sync_output);
+	feed("\033[?2026h");
+	CHECK(t.sync_output);
+	feed("\033[?2026l");
+	CHECK(!t.sync_output);
+	feed("\033[?2026h\033c");
+	CHECK(!t.sync_output);
+
+	/* DECRQM for ANSI modes (4 = IRM, 99 = unknown). */
+	t.reply_len = 0;
+	feed("\033[4$p");
+	CHECK(t.reply_len == 7 && memcmp(t.reply, "\033[4;2$y", 7) == 0);
+	t.reply_len = 0;
+	feed("\033[4h\033[4$p");
+	CHECK(t.reply_len == 7 && memcmp(t.reply, "\033[4;1$y", 7) == 0);
+	t.reply_len = 0;
+	feed("\033[4l\033[99$p");
+	CHECK(t.reply_len == 8 && memcmp(t.reply, "\033[99;0$y", 8) == 0);
+
+	/* DECRQM for DEC private modes (defaults, toggled, and unknown). */
+	t.reply_len = 0;
+	feed("\033[?1$p\033[?6$p\033[?7$p\033[?25$p\033[?2004$p\033[?2026$p\033[?9999$p");
+	const char *want_decrqm_def =
+		"\033[?1;2$y"
+		"\033[?6;2$y"
+		"\033[?7;1$y"
+		"\033[?25;1$y"
+		"\033[?2004;2$y"
+		"\033[?2026;2$y"
+		"\033[?9999;0$y";
+	CHECK(t.reply_len == strlen(want_decrqm_def) &&
+		memcmp(t.reply, want_decrqm_def, t.reply_len) == 0);
+
+	t.reply_len = 0;
+	feed("\033[?1h\033[?6h\033[?7l\033[?25l\033[?1049h\033[?1002h\033[?1006h\033[?2004h\033[?2026h");
+	feed("\033[?1$p\033[?6$p\033[?7$p\033[?25$p\033[?47$p\033[?1047$p\033[?1049$p"
+	     "\033[?1000$p\033[?1002$p\033[?1003$p\033[?1006$p\033[?2004$p\033[?2026$p");
+	const char *want_decrqm_on =
+		"\033[?1;1$y"
+		"\033[?6;1$y"
+		"\033[?7;2$y"
+		"\033[?25;2$y"
+		"\033[?47;1$y"
+		"\033[?1047;1$y"
+		"\033[?1049;1$y"
+		"\033[?1000;2$y"
+		"\033[?1002;1$y"
+		"\033[?1003;2$y"
+		"\033[?1006;1$y"
+		"\033[?2004;1$y"
+		"\033[?2026;1$y";
+	CHECK(t.reply_len == strlen(want_decrqm_on) &&
+		memcmp(t.reply, want_decrqm_on, t.reply_len) == 0);
+
 	/* Garbage never breaks the invariants. */
 	srand(1);
 	unsigned char junk[4096];
@@ -574,7 +664,7 @@ int main(void)
 		for (size_t i = 0; i < sizeof(junk); i++) {
 			int r = rand();
 			/* Mostly escape-ish bytes, so the parser's states get used. */
-			junk[i] = (unsigned char)(r % 4 == 0 ? "\033[;?0123m]P\\\007"[r % 13] : r);
+			junk[i] = (unsigned char)(r % 4 == 0 ? "\033[;?>$0123m]Ppq\\c\007"[r % 18] : r);
 		}
 		tl_term_feed(&t, junk, sizeof(junk));
 		CHECK(t.cx >= 0 && t.cx < t.cols && t.cy >= 0 && t.cy < t.rows);

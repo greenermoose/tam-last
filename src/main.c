@@ -40,6 +40,7 @@
 #define TL_BTN_MIDDLE 0x112u
 #define TL_KEYS_BAR_ROWS 4
 #define TL_OSC52_READ_MAX 65536u
+#define TL_SYNC_TIMEOUT_MS 1000
 
 struct app {
 	struct tl_window win;
@@ -96,6 +97,9 @@ struct app {
 	char *preedit_text;
 	int32_t preedit_cbeg, preedit_cend;
 	int preedit_y0, preedit_y1;
+	/* Synchronized output (DEC 2026) safety timeout. */
+	bool sync_armed;
+	struct timespec sync_deadline;
 };
 
 static int sigchld_pipe[2] = { -1, -1 };
@@ -110,13 +114,14 @@ static void on_sigchld(int sig)
 
 static void usage(FILE *out)
 {
-	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-l LAYOUT] [--osc52 POLICY] [--keys] [-e COMMAND [ARG...]]\n"
+	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-l LAYOUT] [--term NAME] [--osc52 POLICY] [--keys] [-e COMMAND [ARG...]]\n"
 	      "\n"
 	      "  -c, --config FILE  configuration file (default: ~/.config/tam-last/tam-last.ini)\n"
 	      "  -f, --font FILE    a TrueType font file (default: $TAM_LAST_FONT,\n"
 	      "                     then JetBrains Mono, DejaVu Sans Mono, ...)\n"
 	      "  -s, --size POINTS  font size (default 9)\n"
 	      "  -l, --layout NAME  keyboard layout (default: us; 'list' prints available)\n"
+	      "      --term NAME    override $TERM (default: tam-last if installed, else xterm-256color)\n"
 	      "      --osc52 POLICY clipboard policy: write/copy (default), disabled/none,\n"
 	      "                     read/paste, both/copy-paste\n"
 	      "      --keys         trace every key event to stderr and a bottom bar\n"
@@ -226,6 +231,10 @@ static void draw(struct app *a, bool force)
 {
 	if (!a->win.configured)
 		return;
+	if (!force && a->term.sync_output) {
+		a->need_draw = true;
+		return;
+	}
 	if (tl_window_frame_pending(&a->win) && !force) {
 		a->need_draw = true;
 		return;
@@ -1102,6 +1111,17 @@ static const struct tl_window_events events = {
 	on_ime_preedit, on_ime_commit,
 };
 
+static void update_sync_timer(struct app *a)
+{
+	if (a->term.sync_output && !a->sync_armed) {
+		clock_gettime(CLOCK_MONOTONIC, &a->sync_deadline);
+		ts_add_ms(&a->sync_deadline, TL_SYNC_TIMEOUT_MS);
+		a->sync_armed = true;
+	} else if (!a->term.sync_output) {
+		a->sync_armed = false;
+	}
+}
+
 /* Read what the program wrote. Returns false at end of file. */
 static bool read_pty(struct app *a)
 {
@@ -1148,6 +1168,7 @@ int main(int argc, char **argv)
 	const char *config_path = NULL;
 	const char *font_path = NULL;
 	const char *layout_name = NULL;
+	const char *term_name = NULL;
 	enum tl_osc52_policy osc52_cli = TL_OSC52_WRITE;
 	bool osc52_set = false;
 	float pt = 0;
@@ -1182,6 +1203,8 @@ int main(int argc, char **argv)
 		} else if ((strcmp(s, "-l") == 0 || strcmp(s, "--layout") == 0) &&
 			   i + 1 < argc) {
 			layout_name = argv[++i];
+		} else if (strcmp(s, "--term") == 0 && i + 1 < argc) {
+			term_name = argv[++i];
 		} else if (strcmp(s, "--osc52") == 0 && i + 1 < argc) {
 			if (tl_osc52_policy_parse(argv[++i], &osc52_cli) != 0) {
 				fprintf(stderr, "tam-last: bad osc52 policy: %s\n",
@@ -1288,8 +1311,10 @@ int main(int argc, char **argv)
 	signal(SIGPIPE, SIG_IGN);
 
 	/* The program starts first, so its first output is ready to draw. */
-	if (tl_pty_spawn(&a.pty, cmd, a.term.cols, a.term.rows, a.width,
-		    a.height, err, sizeof(err)) != 0) {
+	const char *want_term = term_name != NULL ? term_name :
+		(a.cfg.term[0] != '\0' ? a.cfg.term : NULL);
+	if (tl_pty_spawn(&a.pty, cmd, want_term, a.term.cols, a.term.rows,
+		    a.width, a.height, err, sizeof(err)) != 0) {
 		fprintf(stderr, "tam-last: %s\n", err);
 		return 1;
 	}
@@ -1303,12 +1328,13 @@ int main(int argc, char **argv)
 	bool pty_open = true, child_done = false;
 	while (!a.closing) {
 		handle_term_osc(&a);
+		update_sync_timer(&a);
 		if (a.term.reply_len > 0) {
 			(void)tl_pty_queue(&a.pty, a.term.reply, a.term.reply_len);
 			a.term.reply_len = 0;
 		}
 		update_cursor_shape(&a);
-		if (a.term.dirty || a.need_draw)
+		if ((a.term.dirty || a.need_draw) && !a.term.sync_output)
 			draw(&a, false);
 
 		int pty_more = pty_open ? tl_pty_flush(&a.pty) : 0;
@@ -1330,6 +1356,11 @@ int main(int argc, char **argv)
 		int timeout = -1;
 		if (a.repeat_code != 0 && a.focused)
 			timeout = (int)ms_until(&a.repeat_at);
+		if (a.term.sync_output && a.sync_armed) {
+			int sm = (int)ms_until(&a.sync_deadline);
+			if (timeout < 0 || sm < timeout)
+				timeout = sm;
+		}
 
 		if (poll(fds, 5, timeout) < 0 && errno != EINTR) {
 			perror("tam-last: poll");
@@ -1346,8 +1377,10 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		if (pty_open && (fds[1].revents & (POLLIN | POLLHUP | POLLERR)))
+		if (pty_open && (fds[1].revents & (POLLIN | POLLHUP | POLLERR))) {
 			pty_open = read_pty(&a);
+			update_sync_timer(&a);
+		}
 
 		if (fds[2].revents & POLLIN) {
 			char drain[64];
@@ -1369,6 +1402,12 @@ int main(int argc, char **argv)
 		    ms_until(&a.repeat_at) == 0) {
 			send_key(&a, a.repeat_code, TL_KEY_REPEAT);
 			ts_add_ms(&a.repeat_at, 1000 / a.repeat_rate);
+		}
+
+		if (a.term.sync_output && a.sync_armed &&
+		    ms_until(&a.sync_deadline) == 0) {
+			a.term.sync_output = false;
+			a.sync_armed = false;
 		}
 
 		/* Done when the program has exited, or nothing can write to

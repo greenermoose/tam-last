@@ -62,8 +62,88 @@ static void child(const char *slave, char *const argv[], const char *shell)
 	_exit(127);
 }
 
-int tl_pty_spawn(struct tl_pty *p, char *const argv[], int cols, int rows,
-	int width, int height, char *err, size_t errlen)
+static bool terminfo_exists_in(const char *dir, const char *name)
+{
+	if (dir == NULL || dir[0] == '\0' || name == NULL || name[0] == '\0')
+		return false;
+	char path[1024];
+	int n = snprintf(path, sizeof(path), "%s/%c/%s", dir, name[0], name);
+	if (n <= 0 || (size_t)n >= sizeof(path))
+		return false;
+	return access(path, R_OK) == 0;
+}
+
+static bool terminfo_in_standard_dirs(const char *name)
+{
+	const char *ti = getenv("TERMINFO");
+	if (ti != NULL && ti[0] != '\0')
+		return terminfo_exists_in(ti, name);
+	const char *dirs = getenv("TERMINFO_DIRS");
+	if (dirs != NULL && dirs[0] != '\0') {
+		const char *p = dirs;
+		while (*p != '\0') {
+			const char *colon = strchr(p, ':');
+			size_t len = colon != NULL ? (size_t)(colon - p) : strlen(p);
+			if (len == 0) {
+				if (terminfo_exists_in("/usr/share/terminfo", name))
+					return true;
+			} else if (len < 1024) {
+				char buf[1024];
+				memcpy(buf, p, len);
+				buf[len] = '\0';
+				if (terminfo_exists_in(buf, name))
+					return true;
+			}
+			if (colon == NULL)
+				break;
+			p = colon + 1;
+		}
+	}
+	const char *home = getenv("HOME");
+	if (home != NULL && home[0] != '\0') {
+		char user_ti[1024];
+		int n = snprintf(user_ti, sizeof(user_ti), "%s/.terminfo", home);
+		if (n > 0 && (size_t)n < sizeof(user_ti) &&
+		    terminfo_exists_in(user_ti, name))
+			return true;
+	}
+	return terminfo_exists_in("/usr/share/terminfo", name);
+}
+
+static void setup_term_env(const char *term_name)
+{
+	if (term_name != NULL && term_name[0] != '\0') {
+		setenv("TERM", term_name, 1);
+		return;
+	}
+	if (terminfo_in_standard_dirs("tam-last")) {
+		setenv("TERM", "tam-last", 1);
+		return;
+	}
+	const char *home = getenv("HOME");
+	if (home != NULL && home[0] != '\0') {
+		char local_ti[1024];
+		int n = snprintf(local_ti, sizeof(local_ti),
+			"%s/.local/share/terminfo", home);
+		if (n > 0 && (size_t)n < sizeof(local_ti) &&
+		    terminfo_exists_in(local_ti, "tam-last")) {
+			const char *cur = getenv("TERMINFO_DIRS");
+			char dirs[2048];
+			if (cur != NULL && cur[0] != '\0')
+				snprintf(dirs, sizeof(dirs), "%s:%s", cur,
+					local_ti);
+			else
+				snprintf(dirs, sizeof(dirs), "%s:", local_ti);
+			setenv("TERMINFO_DIRS", dirs, 1);
+			setenv("TERM", "tam-last", 1);
+			return;
+		}
+	}
+	setenv("TERM", "xterm-256color", 1);
+}
+
+int tl_pty_spawn(struct tl_pty *p, char *const argv[], const char *term_name,
+	int cols, int rows, int width, int height, char *err, size_t errlen)
 {
 	memset(p, 0, sizeof(*p));
 	p->master = -1;
@@ -92,7 +172,7 @@ int tl_pty_spawn(struct tl_pty *p, char *const argv[], int cols, int rows,
 		shell = "/bin/sh";
 
 	/* Set before fork, so the child calls nothing unsafe. */
-	setenv("TERM", "xterm-256color", 1);
+	setup_term_env(term_name);
 	setenv("COLORTERM", "truecolor", 1);
 	setenv("TERM_PROGRAM", "tam-last", 1);
 	unsetenv("COLUMNS");

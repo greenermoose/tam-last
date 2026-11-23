@@ -42,6 +42,8 @@ IN THIS REPOSITORY
                                receiver for text-input-v3 input methods
     ./sandbox/demo-osc         0.2.0: window titles, OSC 7/8/52 policy, and
                                OSC 4/10/11/12/104 color queries and live swaps
+    ./sandbox/demo-queries     0.2.1: DA2, XTVERSION, DECRQM, DEC 2026
+                               synchronized output, and tam-last terminfo
     sandbox/theme-gruvbox.ini  sample tam_ini config (Gruvbox, 11 pt)
 
   Pass --in-term to any demo script to run it in the current terminal

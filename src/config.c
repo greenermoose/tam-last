@@ -107,6 +107,19 @@ static int on_ini(void *user, const char *section, const char *name,
 			else
 				fprintf(stderr, "tam-last: config: unknown layout: %s\n",
 					value);
+		} else if (strcmp(name, "term") == 0) {
+			bool ok = value[0] != '\0';
+			for (size_t i = 0; ok && value[i] != '\0'; i++) {
+				unsigned char ch = (unsigned char)value[i];
+				if (ch <= 0x20 || ch >= 0x7f || ch == '/')
+					ok = false;
+			}
+			if (ok && strlen(value) < sizeof(cfg->term))
+				snprintf(cfg->term, sizeof(cfg->term), "%s",
+					value);
+			else
+				fprintf(stderr, "tam-last: config: bad term: %s\n",
+					value);
 		} else if (strcmp(name, "size") == 0) {
 			char *end = NULL;
 			float v = strtof(value, &end);

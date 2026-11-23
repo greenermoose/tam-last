@@ -127,5 +127,15 @@ int main(int argc, char **argv)
 	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = bogus\n") == 0 &&
 		cfg.osc52 == TL_OSC52_BOTH);
 
+	/* term override (default empty = auto-detect). */
+	tl_config_default(&cfg);
+	CHECK(cfg.term[0] == '\0');
+	CHECK(tl_config_load_string(&cfg, "[main]\nterm = tam-last\n") == 0 &&
+		strcmp(cfg.term, "tam-last") == 0);
+	CHECK(tl_config_load_string(&cfg, "[main]\nterm = bad/name\n") == 0 &&
+		strcmp(cfg.term, "tam-last") == 0);
+	CHECK(tl_config_load_string(&cfg, "[main]\nterm = has space\n") == 0 &&
+		strcmp(cfg.term, "tam-last") == 0);
+
 	CHECK_DONE("test_config");
 }

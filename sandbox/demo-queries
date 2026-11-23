@@ -1,0 +1,110 @@
+#!/bin/sh
+# Interactive demo for tam-last 0.2.1: DA2, XTVERSION, DECRQM,
+# synchronized output (DEC 2026), and the tam-last terminfo entry.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+read_reply() {
+	old=$(stty -g 2>/dev/null || true)
+	if [ -z "$old" ]; then
+		echo "(no tty)"
+		return
+	fi
+	stty raw -echo min 0 time 3
+	reply=$(dd bs=256 count=1 2>/dev/null | tr '\033' '^' || true)
+	stty "$old"
+	if [ -z "$reply" ]; then
+		echo "(no reply)"
+	else
+		printf '%s\n' "$reply"
+	fi
+}
+
+printf '\033[2J\033[H'
+printf '\033[1;36m=== tam-last 0.2.1 Queries, Sync Output & Terminfo ===\033[0m\n\n'
+
+printf '1. \033[1mDevice & Version Queries:\033[0m\n'
+printf '   DA1  (CSI c):       '
+printf '\033[c'
+read_reply
+printf '   DA2  (CSI > c):     '
+printf '\033[>c'
+read_reply
+printf '   XTVERSION (CSI > q):'
+printf '\033[>q'
+read_reply
+
+printf '\n2. \033[1mDECRQM Mode Queries (1=set, 2=reset, 0=unknown):\033[0m\n'
+printf '   ANSI 4   (IRM):     '
+printf '\033[4$p'
+read_reply
+printf '   DEC 7    (autowrap):'
+printf '\033[?7$p'
+read_reply
+printf '   DEC 25   (cursor):  '
+printf '\033[?25$p'
+read_reply
+printf '   DEC 2004 (b-paste): '
+printf '\033[?2004$p'
+read_reply
+printf '   DEC 2026 (sync):    '
+printf '\033[?2026$p'
+read_reply
+printf '   DEC 9999 (unknown): '
+printf '\033[?9999$p'
+read_reply
+
+printf '\n3. \033[1mTerminfo & Environment:\033[0m\n'
+printf '   TERM=%s   COLORTERM=%s   TERM_PROGRAM=%s\n' \
+	"${TERM:-}" "${COLORTERM:-}" "${TERM_PROGRAM:-}"
+if [ -d "$ROOT/build/terminfo" ]; then
+	ti_colors=$(TERMINFO="$ROOT/build/terminfo" tput -T tam-last colors 2>/dev/null || echo "?")
+	ti_direct=$(TERMINFO="$ROOT/build/terminfo" tput -T tam-last-direct colors 2>/dev/null || echo "?")
+	printf '   build/terminfo: tam-last colors=%s, tam-last-direct colors=%s\n' \
+		"$ti_colors" "$ti_direct"
+fi
+
+printf '\n4. \033[1mSynchronized Output (DEC 2026) Animation:\033[0m\n'
+printf '   Press [s] to run 24 tear-free synchronized frames, [q] to quit: '
+while :; do
+	old=$(stty -g 2>/dev/null || true)
+	if [ -n "$old" ]; then
+		stty raw -echo
+		ch=$(dd bs=1 count=1 2>/dev/null || true)
+		stty "$old"
+	else
+		IFS= read -r ch || break
+	fi
+	case "$ch" in
+	s | S)
+		printf '\n'
+		i=0
+		while [ "$i" -lt 24 ]; do
+			# Begin synchronized update (CSI ? 2026 h)
+			printf '\033[?2026h\r\033[K   ['
+			j=0
+			while [ "$j" -lt 24 ]; do
+				if [ "$j" -le "$i" ]; then
+					printf '\033[32m#\033[0m'
+				else
+					printf '.'
+				fi
+				j=$((j + 1))
+			done
+			printf '] frame %2d/24\033[?2026l' $((i + 1))
+			sleep 0.04
+			i=$((i + 1))
+		done
+		printf '\n   Done. Press [s] again or [q] to quit: '
+		;;
+	q | Q | '')
+		printf '\n'
+		break
+		;;
+	esac
+done

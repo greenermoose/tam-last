@@ -10,6 +10,10 @@
 
 #include <tam_uni.h>
 
+#ifndef TL_VERSION
+#define TL_VERSION "unknown"
+#endif
+
 #define TERM_MAX_DIM 4096
 
 static struct tl_cell blank(const struct tl_term *t)
@@ -183,6 +187,7 @@ static void reset(struct tl_term *t)
 	t->mouse_mode = TL_MOUSE_NONE;
 	t->mouse_sgr = false;
 	t->bracketed_paste = false;
+	t->sync_output = false;
 	memset(t->kitty_kbd, 0, sizeof(t->kitty_kbd));
 	t->kitty_kbd_top[0] = 0;
 	t->kitty_kbd_top[1] = 0;
@@ -763,6 +768,9 @@ static void dec_mode(struct tl_term *t, const struct tl_csi *c, bool on)
 		case 2004:
 			t->bracketed_paste = on;
 			break;
+		case 2026:
+			t->sync_output = on;
+			break;
 		default: break;
 		}
 	}
@@ -819,9 +827,58 @@ static void kitty_kbd_csi(struct tl_term *t, const struct tl_csi *c)
 	}
 }
 
+static int version_num(void)
+{
+	int maj = 0, min = 0, pat = 0;
+	(void)sscanf(TL_VERSION, "%d.%d.%d", &maj, &min, &pat);
+	if (maj < 0)
+		maj = 0;
+	if (min < 0)
+		min = 0;
+	if (pat < 0)
+		pat = 0;
+	return maj * 10000 + min * 100 + pat;
+}
+
+static void decrqm_dec(struct tl_term *t, const struct tl_csi *c)
+{
+	int mode = c->n > 0 ? c->p[0] : 0;
+	int status = 0; /* 0 = not recognized, 1 = set, 2 = reset */
+	switch (mode) {
+	case 1: status = t->app_cursor ? 1 : 2; break;
+	case 6: status = t->origin_mode ? 1 : 2; break;
+	case 7: status = t->autowrap ? 1 : 2; break;
+	case 25: status = t->cursor_visible ? 1 : 2; break;
+	case 47:
+	case 1047:
+	case 1049: status = t->alt_screen ? 1 : 2; break;
+	case 1000: status = t->mouse_mode == TL_MOUSE_X10 ? 1 : 2; break;
+	case 1002: status = t->mouse_mode == TL_MOUSE_DRAG ? 1 : 2; break;
+	case 1003: status = t->mouse_mode == TL_MOUSE_ANY ? 1 : 2; break;
+	case 1006: status = t->mouse_sgr ? 1 : 2; break;
+	case 2004: status = t->bracketed_paste ? 1 : 2; break;
+	case 2026: status = t->sync_output ? 1 : 2; break;
+	default: status = 0; break;
+	}
+	char buf[32];
+	snprintf(buf, sizeof(buf), "\033[?%d;%d$y", mode, status);
+	reply(t, buf);
+}
+
+static void decrqm_ansi(struct tl_term *t, const struct tl_csi *c)
+{
+	int mode = c->n > 0 ? c->p[0] : 0;
+	int status = 0;
+	if (mode == 4)
+		status = t->insert_mode ? 1 : 2;
+	char buf[32];
+	snprintf(buf, sizeof(buf), "\033[%d;%d$y", mode, status);
+	reply(t, buf);
+}
+
 void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 {
-	char buf[48];
+	char buf[64];
 
 	if (c->priv == '?') {
 		if (c->inter == 0 && c->final == 'h')
@@ -830,11 +887,26 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 			dec_mode(t, c, false);
 		else if (c->inter == 0 && c->final == 'u')
 			kitty_kbd_csi(t, c);
+		else if (c->inter == '$' && c->final == 'p')
+			decrqm_dec(t, c);
 		return;
 	}
 	if (c->priv == '>' || c->priv == '<' || c->priv == '=') {
-		if (c->inter == 0 && c->final == 'u')
+		if (c->inter == 0 && c->final == 'u') {
 			kitty_kbd_csi(t, c);
+		} else if (c->priv == '>' && c->inter == 0 && c->final == 'c') {
+			if (arg(c, 0, 0) == 0) {
+				snprintf(buf, sizeof(buf), "\033[>1;%d;0c",
+					version_num());
+				reply(t, buf);
+			}
+		} else if (c->priv == '>' && c->inter == 0 && c->final == 'q') {
+			if (arg(c, 0, 0) == 0) {
+				snprintf(buf, sizeof(buf),
+					"\033P>|tam-last(%s)\033\\", TL_VERSION);
+				reply(t, buf);
+			}
+		}
 		return;
 	}
 	if (c->priv != 0)
@@ -854,6 +926,11 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 			}
 			mark_row(t, t->cy);
 		}
+		return;
+	}
+	if (c->inter == '$') {
+		if (c->final == 'p')
+			decrqm_ansi(t, c);
 		return;
 	}
 	if (c->inter != 0)

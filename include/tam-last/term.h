@@ -129,6 +129,7 @@ struct tl_term {
 	enum tl_mouse_mode mouse_mode; /* 1000, 1002, 1003 */
 	bool mouse_sgr; /* 1006 */
 	bool bracketed_paste; /* 2004 */
+	bool sync_output; /* 2026: synchronized update (BSU/ESU) */
 	uint8_t kitty_kbd[2][TL_KITTY_KBD_STACK_MAX]; /* 0 = primary, 1 = alt */
 	int kitty_kbd_top[2];
 	struct tl_sb_page sb_pages[TL_SB_RING_CAP];

@@ -15,9 +15,11 @@ struct tl_pty {
 };
 
 /* Start argv (NULL: $SHELL, else /bin/sh) on a new pty of the given size.
+ * term_name overrides $TERM when non-NULL and non-empty; otherwise tam-last
+ * is used when its terminfo entry is installed, falling back to xterm-256color.
  * Returns 0, or -1 with a message in err. */
-int tl_pty_spawn(struct tl_pty *p, char *const argv[], int cols, int rows,
-	int width, int height, char *err, size_t errlen);
+int tl_pty_spawn(struct tl_pty *p, char *const argv[], const char *term_name,
+	int cols, int rows, int width, int height, char *err, size_t errlen);
 void tl_pty_resize(struct tl_pty *p, int cols, int rows, int width,
 	int height);
 /* Queue bytes for the program; returns -1 when the queue is full (1 MiB). */
