@@ -2,6 +2,9 @@
  * coverage mask in the foreground color, then combining marks and cursor. */
 #include "tam-last/render.h"
 
+#include <string.h>
+#include <wchar.h>
+
 static const uint32_t theme16[16] = {
 	0x1a1b26, 0xf7768e, 0x9ece6a, 0xe0af68,
 	0x7aa2f7, 0xad8ee6, 0x449dab, 0xa9b1d6,
@@ -197,4 +200,141 @@ void tl_render_bar(struct tl_font *f, const struct tl_palette *pal,
 			draw_glyph(f, c, 1, TL_STYLE_REGULAR, fg, pixels,
 				width, height, pad + x * cw, py0);
 	}
+}
+
+static uint32_t utf8_next(const char *s, size_t len, size_t *pos)
+{
+	unsigned char b0 = (unsigned char)s[*pos];
+	if (b0 < 0x80) {
+		(*pos)++;
+		return b0;
+	}
+	uint32_t cp = 0;
+	size_t need = 0;
+	uint32_t min_cp = 0;
+	if ((b0 & 0xe0) == 0xc0) {
+		cp = b0 & 0x1fu; need = 2; min_cp = 0x80;
+	} else if ((b0 & 0xf0) == 0xe0) {
+		cp = b0 & 0x0fu; need = 3; min_cp = 0x800;
+	} else if ((b0 & 0xf8) == 0xf0) {
+		cp = b0 & 0x07u; need = 4; min_cp = 0x10000;
+	} else {
+		(*pos)++;
+		return 0xfffdu;
+	}
+	if (*pos + need > len) {
+		(*pos)++;
+		return 0xfffdu;
+	}
+	for (size_t i = 1; i < need; i++) {
+		unsigned char bx = (unsigned char)s[*pos + i];
+		if ((bx & 0xc0) != 0x80) {
+			(*pos)++;
+			return 0xfffdu;
+		}
+		cp = (cp << 6) | (bx & 0x3fu);
+	}
+	*pos += need;
+	if (cp < min_cp || cp > 0x10ffffu || (cp >= 0xd800u && cp <= 0xdfffu))
+		return 0xfffdu;
+	return cp;
+}
+
+int tl_render_preedit(const struct tl_term *t, struct tl_font *f,
+	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
+	int pad, const struct tl_preedit *pe)
+{
+	if (pe == NULL || pe->text == NULL || pe->text[0] == '\0')
+		return -1;
+	if (t->cx < 0 || t->cx >= t->cols || t->cy < 0 || t->cy >= t->rows)
+		return -1;
+
+	int cw = f->cell_w, ch = f->cell_h;
+	int line_h = ch / 14 > 0 ? ch / 14 : 1;
+	size_t len = strlen(pe->text);
+	int x = t->cx, y = t->cy;
+	int last_y = y;
+	int prev_x = -1, prev_y = -1, prev_span = 1;
+	uint32_t prev_fg = pal->fg;
+
+	bool has_sel = pe->cursor_begin >= 0 && pe->cursor_end > pe->cursor_begin;
+	bool has_bar = pe->cursor_begin >= 0 && pe->cursor_begin == pe->cursor_end;
+	bool bar_placed = false;
+	int bar_x = x, bar_y = y;
+
+	size_t pos = 0;
+	while (pos < len) {
+		size_t byte_start = pos;
+		if (has_bar && !bar_placed && (int32_t)byte_start >= pe->cursor_begin) {
+			bar_x = x;
+			bar_y = y;
+			bar_placed = true;
+		}
+		uint32_t cp = utf8_next(pe->text, len, &pos);
+		int w = wcwidth((wchar_t)cp);
+		if (w < 0)
+			w = 1;
+		if (w == 0) {
+			if (prev_x >= 0 && prev_y >= 0) {
+				int px0 = pad + prev_x * cw;
+				int py0 = pad + prev_y * ch;
+				draw_glyph(f, cp, prev_span, TL_STYLE_REGULAR,
+					prev_fg, pixels, width, height, px0, py0);
+			}
+			continue;
+		}
+		int span = w > 1 ? 2 : 1;
+		if (span == 2 && t->cols < 2)
+			span = 1;
+		if (x + span > t->cols) {
+			x = 0;
+			y++;
+			if (y >= t->rows)
+				break;
+		}
+		bool sel = has_sel &&
+			(int32_t)byte_start >= pe->cursor_begin &&
+			(int32_t)byte_start < pe->cursor_end;
+		uint32_t fg = sel ? pal->bg : pal->fg;
+		uint32_t bg = sel ? pal->fg : pal->bg;
+		int px0 = pad + x * cw;
+		int py0 = pad + y * ch;
+		rect(pixels, width, height, px0, py0, cw * span, ch, bg);
+		if (cp != ' ')
+			draw_glyph(f, cp, span, TL_STYLE_REGULAR, fg, pixels,
+				width, height, px0, py0);
+		rect(pixels, width, height, px0, py0 + f->baseline + line_h,
+			cw * span, line_h, fg);
+		prev_x = x;
+		prev_y = y;
+		prev_span = span;
+		prev_fg = fg;
+		last_y = y;
+		x += span;
+	}
+
+	if (has_bar) {
+		if (!bar_placed) {
+			if (x >= t->cols && y + 1 < t->rows) {
+				bar_x = 0;
+				bar_y = y + 1;
+			} else if (x >= t->cols) {
+				bar_x = t->cols - 1;
+				bar_y = y;
+			} else {
+				bar_x = x;
+				bar_y = y;
+			}
+		}
+		if (bar_y < t->rows && bar_x < t->cols) {
+			int px0 = pad + bar_x * cw;
+			int py0 = pad + bar_y * ch;
+			rect(pixels, width, height, px0, py0, line_h, ch,
+				pal->cursor);
+			if (bar_y > last_y)
+				last_y = bar_y;
+		}
+	}
+
+	return last_y;
 }

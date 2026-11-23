@@ -429,3 +429,57 @@ uint32_t tl_fractional_get(struct tl_wire *w, uint32_t manager,
 	tl_msg_u32(&m, surface);
 	return send_new(w, manager, 1, &m, id);
 }
+
+uint32_t tl_text_input_mgr_get(struct tl_wire *w, uint32_t mgr,
+	uint32_t seat, void *data)
+{
+	struct tl_msg m;
+	uint32_t id = tl_wire_new_id(w, TL_IF_TEXT_INPUT, data);
+	tl_msg_init(&m);
+	tl_msg_u32(&m, id);
+	tl_msg_u32(&m, seat);
+	return send_new(w, mgr, 1, &m, id);
+}
+
+void tl_text_input_destroy(struct tl_wire *w, uint32_t ti)
+{
+	send0(w, ti, 0);
+	tl_wire_zombie(w, ti);
+}
+
+void tl_text_input_enable(struct tl_wire *w, uint32_t ti)
+{
+	send0(w, ti, 1);
+}
+
+void tl_text_input_disable(struct tl_wire *w, uint32_t ti)
+{
+	send0(w, ti, 2);
+}
+
+void tl_text_input_set_content_type(struct tl_wire *w, uint32_t ti,
+	uint32_t hint, uint32_t purpose)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_u32(&m, hint);
+	tl_msg_u32(&m, purpose);
+	(void)tl_wire_send(w, ti, 5, &m);
+}
+
+void tl_text_input_set_cursor_rectangle(struct tl_wire *w, uint32_t ti,
+	int32_t x, int32_t y, int32_t width, int32_t height)
+{
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_i32(&m, x);
+	tl_msg_i32(&m, y);
+	tl_msg_i32(&m, width);
+	tl_msg_i32(&m, height);
+	(void)tl_wire_send(w, ti, 6, &m);
+}
+
+void tl_text_input_commit(struct tl_wire *w, uint32_t ti)
+{
+	send0(w, ti, 7);
+}

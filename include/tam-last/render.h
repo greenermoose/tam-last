@@ -37,4 +37,16 @@ void tl_render_bar(struct tl_font *f, const struct tl_palette *pal,
 	uint32_t *pixels, int width, int height, int pad, int y_row, int cols,
 	const char *text);
 
+struct tl_preedit {
+	const char *text;       /* UTF-8 preedit text, or NULL/empty */
+	int32_t cursor_begin;   /* byte offset in text, or -1 if hidden */
+	int32_t cursor_end;     /* byte offset in text, or -1 if hidden */
+};
+
+/* Draw an active IME preedit string overlaid at the terminal cursor.
+ * Returns the last grid row touched (or -1 if nothing was drawn). */
+int tl_render_preedit(const struct tl_term *t, struct tl_font *f,
+	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
+	int pad, const struct tl_preedit *pe);
+
 #endif

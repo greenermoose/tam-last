@@ -1,0 +1,61 @@
+W12 INPUT METHODS VIA TEXT-INPUT-V3 (0.1.3)
+
+Date: 2026-11-23
+AI harness: agy
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice for tam-last"
+  Fred: "Approved. Proceed."
+  Fred: "pass. Commit and finish"
+
+
+DONE
+
+  - Added protocols/text-input-unstable-v3.xml as the reference XML
+    verified by tests/test_wire.c.
+  - Added TL_IF_TEXT_INPUT_MGR and TL_IF_TEXT_INPUT in
+    include/tam-last/wire.h, TL_TEXT_INPUT_* event opcodes and content
+    hint/purpose constants in include/tam-last/proto.h, and 7 hand-written
+    request encoders in src/wl/proto.c.
+  - Wired zwp_text_input_manager_v3 (v1) binding, zwp_text_input_v3
+    creation/destruction, double-buffered enter/leave/preedit_string/
+    commit_string/delete_surrounding_text/done handling, and deduplicated
+    tl_window_set_cursor_rect() in include/tam-last/window.h and
+    src/window.c.
+  - Added struct tl_preedit and tl_render_preedit() in
+    include/tam-last/render.h and src/render.c to draw underlined UTF-8
+    preedit overlays at the cursor with selection inversion, bar/hidden
+    cursor rendering, wide characters, combining marks, and row wrapping.
+  - Added tl_key_trace_ime() in include/tam-last/keys.h and
+    src/keys/trace.c for --keys tracing of IME preedit and commit events.
+  - Integrated on_ime_preedit, on_ime_commit, preedit dirty-row tracking,
+    local Compose reset on IME input, and fractional-scale-aware cursor
+    rectangle updates in src/main.c.
+  - Expanded tests/test_wire.c (173 checks, including mock compositor
+    text-input-v3 lifecycle), tests/test_render.c (82 checks), and
+    tests/test_keys.c (266 checks).
+  - Added interactive sandbox/demo-ime (option 0 in sandbox/play and
+    documented in sandbox/README-sandbox).
+  - Bumped VERSION to 0.1.3 and marked plans/P2-key-path.md implemented
+    (completing Phase P2).
+  - Verified make clean && make (zero warnings), make test, make
+    sanitize (ASan/UBSan + headless tam-pane), demo-ime PTY smoke test,
+    readelf -d (libc and libm only), sh -n, and tam-idol/tools/idol-check.
+  - Fred tested and accepted tam-last 0.1.3 on 2026-11-23.
+
+
+FAILED
+
+  - None.
+
+
+HANDOFF
+
+  - Fred accepted 0.1.3 (input methods via text-input-v3) on 2026-11-23,
+    completing Phase P2.
+  - Next milestone is Phase P3, 0.2.0 (window titles, OSC 7, OSC 8,
+    OSC 52 with policy, color queries and changes; see
+    plans/P3-daily-parity.md).

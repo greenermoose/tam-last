@@ -174,4 +174,8 @@ size_t tl_key_trace_format(char *buf, size_t cap, uint32_t code,
 	unsigned mods, enum tl_key_event ev, const struct tl_key_modes *m,
 	const char *pty_bytes, size_t pty_len, const char *note);
 
+/* Format one input-method (text-input-v3) trace line for --keys. */
+size_t tl_key_trace_ime(char *buf, size_t cap, const char *kind,
+	const char *text, size_t len, int32_t cursor_begin, int32_t cursor_end);
+
 #endif

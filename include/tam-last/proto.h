@@ -35,15 +35,20 @@ enum {
 	TL_XDG_SURFACE_CONFIGURE = 0,
 	TL_TOPLEVEL_CONFIGURE = 0, TL_TOPLEVEL_CLOSE = 1,
 	TL_TOPLEVEL_CONFIGURE_BOUNDS = 2, TL_TOPLEVEL_WM_CAPABILITIES = 3,
-	TL_FRACTIONAL_PREFERRED_SCALE = 0
+	TL_FRACTIONAL_PREFERRED_SCALE = 0,
+	TL_TEXT_INPUT_ENTER = 0, TL_TEXT_INPUT_LEAVE = 1,
+	TL_TEXT_INPUT_PREEDIT_STRING = 2, TL_TEXT_INPUT_COMMIT_STRING = 3,
+	TL_TEXT_INPUT_DELETE_SURROUNDING_TEXT = 4, TL_TEXT_INPUT_DONE = 5
 };
 
-/* wl_seat capability bits, wl_shm formats, cursor shapes. */
+/* wl_seat capability bits, wl_shm formats, cursor shapes, text-input-v3. */
 #define TL_SEAT_CAP_POINTER 1u
 #define TL_SEAT_CAP_KEYBOARD 2u
 #define TL_SHM_XRGB8888 1u
 #define TL_CURSOR_SHAPE_DEFAULT 1u
 #define TL_CURSOR_SHAPE_TEXT 9u
+#define TL_TEXT_INPUT_HINT_NONE 0u
+#define TL_TEXT_INPUT_PURPOSE_TERMINAL 13u
 
 uint32_t tl_display_sync(struct tl_wire *w, void *data);
 uint32_t tl_display_get_registry(struct tl_wire *w, void *data);
@@ -128,5 +133,17 @@ void tl_viewport_set_destination(struct tl_wire *w, uint32_t viewport,
 /* fractional-scale-v1: the compositor's preferred scale, in 120ths. */
 uint32_t tl_fractional_get(struct tl_wire *w, uint32_t manager,
 	uint32_t surface, void *data);
+
+/* text-input-unstable-v3: input methods. */
+uint32_t tl_text_input_mgr_get(struct tl_wire *w, uint32_t mgr,
+	uint32_t seat, void *data);
+void tl_text_input_destroy(struct tl_wire *w, uint32_t ti);
+void tl_text_input_enable(struct tl_wire *w, uint32_t ti);
+void tl_text_input_disable(struct tl_wire *w, uint32_t ti);
+void tl_text_input_set_content_type(struct tl_wire *w, uint32_t ti,
+	uint32_t hint, uint32_t purpose);
+void tl_text_input_set_cursor_rectangle(struct tl_wire *w, uint32_t ti,
+	int32_t x, int32_t y, int32_t width, int32_t height);
+void tl_text_input_commit(struct tl_wire *w, uint32_t ti);
 
 #endif

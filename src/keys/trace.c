@@ -130,6 +130,52 @@ static void sb_hex2(struct strbuf *s, unsigned char b)
 	sb_putc(s, hex[b & 0xf]);
 }
 
+static void sb_int(struct strbuf *s, int32_t v)
+{
+	char tmp[16];
+	int n = snprintf(tmp, sizeof(tmp), "%d", v);
+	if (n > 0)
+		sb_puts(s, tmp);
+}
+
+static void sb_escaped(struct strbuf *s, const char *bytes, size_t len)
+{
+	sb_putc(s, '"');
+	for (size_t i = 0; i < len; i++) {
+		unsigned char b = (unsigned char)bytes[i];
+		if (b == 0x1b) {
+			sb_puts(s, "ESC");
+		} else if (b == '\r') {
+			sb_puts(s, "\\r");
+		} else if (b == '\n') {
+			sb_puts(s, "\\n");
+		} else if (b == '\t') {
+			sb_puts(s, "\\t");
+		} else if (b == '"') {
+			sb_puts(s, "\\\"");
+		} else if (b == '\\') {
+			sb_puts(s, "\\\\");
+		} else if (b >= 0x20 && b <= 0x7e) {
+			sb_putc(s, (char)b);
+		} else {
+			sb_puts(s, "\\x");
+			sb_hex2(s, b);
+		}
+	}
+	sb_putc(s, '"');
+}
+
+static void sb_hex_list(struct strbuf *s, const char *bytes, size_t len)
+{
+	sb_putc(s, '[');
+	for (size_t i = 0; i < len; i++) {
+		if (i > 0)
+			sb_putc(s, ' ');
+		sb_hex2(s, (unsigned char)bytes[i]);
+	}
+	sb_putc(s, ']');
+}
+
 static const char *event_name(enum tl_key_event ev)
 {
 	switch (ev) {
@@ -222,35 +268,9 @@ size_t tl_key_trace_format(char *buf, size_t cap, uint32_t code,
 	/* Exact bytes written to the pty. */
 	sb_puts(&s, " pty=");
 	if (pty_bytes != NULL && pty_len > 0) {
-		sb_putc(&s, '"');
-		for (size_t i = 0; i < pty_len; i++) {
-			unsigned char b = (unsigned char)pty_bytes[i];
-			if (b == 0x1b) {
-				sb_puts(&s, "ESC");
-			} else if (b == '\r') {
-				sb_puts(&s, "\\r");
-			} else if (b == '\n') {
-				sb_puts(&s, "\\n");
-			} else if (b == '\t') {
-				sb_puts(&s, "\\t");
-			} else if (b == '"') {
-				sb_puts(&s, "\\\"");
-			} else if (b == '\\') {
-				sb_puts(&s, "\\\\");
-			} else if (b >= 0x20 && b <= 0x7e) {
-				sb_putc(&s, (char)b);
-			} else {
-				sb_puts(&s, "\\x");
-				sb_hex2(&s, b);
-			}
-		}
-		sb_puts(&s, "\" [");
-		for (size_t i = 0; i < pty_len; i++) {
-			if (i > 0)
-				sb_putc(&s, ' ');
-			sb_hex2(&s, (unsigned char)pty_bytes[i]);
-		}
-		sb_putc(&s, ']');
+		sb_escaped(&s, pty_bytes, pty_len);
+		sb_putc(&s, ' ');
+		sb_hex_list(&s, pty_bytes, pty_len);
 	} else {
 		sb_puts(&s, "(none)");
 	}
@@ -259,6 +279,42 @@ size_t tl_key_trace_format(char *buf, size_t cap, uint32_t code,
 		sb_puts(&s, " [");
 		sb_puts(&s, note);
 		sb_putc(&s, ']');
+	}
+
+	s.buf[s.len] = '\0';
+	return s.len;
+}
+
+size_t tl_key_trace_ime(char *buf, size_t cap, const char *kind,
+	const char *text, size_t len, int32_t cursor_begin, int32_t cursor_end)
+{
+	if (cap == 0)
+		return 0;
+
+	struct strbuf s = { buf, cap, 0 };
+	sb_puts(&s, "ime ");
+	sb_puts(&s, kind != NULL ? kind : "event");
+
+	if (kind != NULL && kind[0] == 'p') {
+		if (text == NULL || len == 0) {
+			sb_puts(&s, " (clear)");
+		} else {
+			sb_puts(&s, " cursor=");
+			sb_int(&s, cursor_begin);
+			sb_puts(&s, "..");
+			sb_int(&s, cursor_end);
+			sb_puts(&s, " text=");
+			sb_escaped(&s, text, len);
+		}
+	} else {
+		sb_puts(&s, " pty=");
+		if (text != NULL && len > 0) {
+			sb_escaped(&s, text, len);
+			sb_putc(&s, ' ');
+			sb_hex_list(&s, text, len);
+		} else {
+			sb_puts(&s, "(none)");
+		}
 	}
 
 	s.buf[s.len] = '\0';

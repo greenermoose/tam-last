@@ -3,37 +3,36 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-23, with W11
+Updated: 2026-11-23, with W12
 
 
 STATE
 
-  Version 0.1.2 on branch dev (Phase P2; Fred accepted 0.1.2 on
-  2026-11-23, W11). Implemented and verified:
-  - Compact layout and compose sources in layouts/ (us, us-intl, dvorak,
-    colemak, uk, de, fr, plus unified layouts/compose) compiled at build
-    time by pure C11 tools/gen-layouts.c into build/layouts_gen.c.
-  - 4-level layout lookup (src/keys/keymap.c) with layout-aware AltGr
-    (TL_MOD_ALTGR on RightAlt for AltGr layouts), Unicode-aware Caps
-    Lock on letter pairs, dead-key and multi-key Compose state machine
-    (src/keys/compose.c), multi-byte UTF-8 encoding in legacy and Kitty
-    modes (src/keys/encode.c), and AltGr/dead-key/compose reporting in
-    --keys trace mode (src/keys/trace.c).
-  - Layout selection via -l/--layout NAME (including --layout list) and
-    [main] layout = <name> in tam-last.ini.
-  - Interactive sandbox/demo-layouts (option 9 in sandbox/play).
+  Version 0.1.3 on branch dev (Phase P2 complete; Fred accepted 0.1.3 on
+  2026-11-23, W12). Implemented and verified:
+  - Wayland text-input-v3 (zwp_text_input_manager_v3 v1,
+    zwp_text_input_v3) hand-written wire requests and double-buffered
+    event state machine (protocols/text-input-unstable-v3.xml,
+    src/wl/proto.c, src/window.c) with content purpose = terminal and
+    deduplicated surface-local cursor rectangle reporting.
+  - In-place UTF-8 preedit overlay rendering (src/render.c
+    tl_render_preedit) with underline, selection range inversion,
+    bar/hidden cursor, wide characters, combining marks, and wrapping.
+  - --keys trace support for IME preedit and commit events
+    (src/keys/trace.c tl_key_trace_ime) and integration in src/main.c
+    with preedit dirty-row tracking and local Compose reset.
+  - Interactive sandbox/demo-ime (option 0 in sandbox/play).
 
-  make test (test_wire 116, test_vt 318, test_ttf 3036, test_keys 262,
-  test_render 69, test_config 41, version 0.1.2, headless tam-pane),
-  ASan/UBSan sanitize tests, --layout list/bogus checks, demo-layouts
-  PTY smoke test, readelf -d (libc and libm only), and idol-check all
-  pass with zero warnings.
+  make test (test_wire 173, test_vt 318, test_ttf 3036, test_keys 266,
+  test_render 82, test_config 41, version 0.1.3, headless tam-pane),
+  ASan/UBSan sanitize tests, demo-ime PTY smoke test, readelf -d (libc
+  and libm only), and idol-check all pass with zero warnings.
 
 
 NEXT
 
-  1. Phase P2, 0.1.3 (input methods via text-input-v3; see
-     plans/P2-key-path.md).
+  1. Phase P3, 0.2.0 (window titles, OSC 7, OSC 8, OSC 52 with a policy,
+     color queries and changes; see plans/P3-daily-parity.md).
 
 
 WAITING FOR FRED

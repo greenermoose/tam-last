@@ -84,6 +84,10 @@ struct app {
 	int keys_count;
 	bool buf_bar_dirty[2];
 	uint32_t shortcut_code;
+	/* Active IME (text-input-v3) preedit state. */
+	char *preedit_text;
+	int32_t preedit_cbeg, preedit_cend;
+	int preedit_y0, preedit_y1;
 };
 
 static int sigchld_pipe[2] = { -1, -1 };
@@ -178,6 +182,36 @@ static void sync_dirty(struct app *a)
 	}
 }
 
+static void mark_rows_dirty(struct app *a, int y0, int y1)
+{
+	int rows = a->buf_dirty_rows;
+	if (y0 < 0)
+		y0 = 0;
+	if (y1 >= rows)
+		y1 = rows - 1;
+	for (int i = 0; i < 2; i++) {
+		if (a->buf_dirty[i] == NULL)
+			continue;
+		for (int y = y0; y <= y1; y++)
+			a->buf_dirty[i][y] = true;
+	}
+}
+
+static void update_ime_cursor_rect(struct app *a)
+{
+	if (!tl_window_has_text_input(&a->win))
+		return;
+	int dx = a->pad + a->term.cx * a->font.cell_w;
+	int dy = a->pad + a->term.cy * a->font.cell_h;
+	int dw = a->font.cell_w;
+	int dh = a->font.cell_h;
+	int32_t lx = (int32_t)(((long)dx * 120) / a->scale120);
+	int32_t ly = (int32_t)(((long)dy * 120) / a->scale120);
+	int32_t lw = (int32_t)(((long)dw * 120 + a->scale120 - 1) / a->scale120);
+	int32_t lh = (int32_t)(((long)dh * 120 + a->scale120 - 1) / a->scale120);
+	tl_window_set_cursor_rect(&a->win, lx, ly, lw, lh);
+}
+
 static void draw(struct app *a, bool force)
 {
 	if (!a->win.configured)
@@ -194,8 +228,40 @@ static void draw(struct app *a, bool force)
 	}
 	int idx = (b == &a->win.bufs[1]) ? 1 : 0;
 	bool full = a->buf_full[idx] || a->buf_dirty[idx] == NULL;
+	bool show_preedit = a->preedit_text != NULL && a->preedit_text[0] != '\0' &&
+		(a->term.alt_screen || a->term.view_offset == 0);
+	if (show_preedit && !full && a->buf_dirty[idx] != NULL) {
+		int y0 = a->preedit_y0 >= 0 ? a->preedit_y0 : a->term.cy;
+		int y1 = a->preedit_y1 >= 0 ? a->preedit_y1 : a->term.cy;
+		if (a->term.cy < y0)
+			y0 = a->term.cy;
+		if (a->term.cy > y1)
+			y1 = a->term.cy;
+		for (int y = y0; y <= y1 && y < a->buf_dirty_rows; y++)
+			if (y >= 0)
+				a->buf_dirty[idx][y] = true;
+	}
 	tl_render_rows(&a->term, &a->font, &a->pal, b->pixels, b->width,
 		b->height, a->pad, a->focused, &a->sel, a->buf_dirty[idx], full);
+	if (show_preedit) {
+		struct tl_preedit pe = {
+			a->preedit_text, a->preedit_cbeg, a->preedit_cend
+		};
+		int last_y = tl_render_preedit(&a->term, &a->font, &a->pal,
+			b->pixels, b->width, b->height, a->pad, &pe);
+		if (last_y >= 0) {
+			a->preedit_y0 = a->term.cy;
+			a->preedit_y1 = last_y;
+			if (!full && a->buf_dirty[idx] != NULL) {
+				for (int y = a->preedit_y0; y <= last_y && y < a->buf_dirty_rows; y++)
+					if (y >= 0)
+						a->buf_dirty[idx][y] = true;
+			}
+		}
+	} else {
+		a->preedit_y0 = a->preedit_y1 = -1;
+	}
+	update_ime_cursor_rect(a);
 	bool bar_drawn = false;
 	if (a->keys_mode && a->keys_bar_rows > 0 &&
 	    (full || a->buf_bar_dirty[idx])) {
@@ -253,13 +319,8 @@ static void draw(struct app *a, bool force)
 	a->term.dirty = false;
 }
 
-static void trace_key(struct app *a, uint32_t code, enum tl_key_event ev,
-	const struct tl_key_modes *m, const char *seq, size_t n,
-	const char *note)
+static void trace_append_line(struct app *a, const char *line)
 {
-	char line[512];
-	tl_key_trace_format(line, sizeof(line), code, tl_kbd_mods(&a->kbd),
-		ev, m, seq, n, note);
 	fputs(line, stderr);
 	fputc('\n', stderr);
 	fflush(stderr);
@@ -272,9 +333,28 @@ static void trace_key(struct app *a, uint32_t code, enum tl_key_event ev,
 				sizeof(a->keys_lines[0]));
 		a->keys_count = cap - 1;
 	}
-	memcpy(a->keys_lines[a->keys_count++], line, sizeof(line));
+	snprintf(a->keys_lines[a->keys_count++], sizeof(a->keys_lines[0]),
+		"%s", line);
 	a->buf_bar_dirty[0] = a->buf_bar_dirty[1] = true;
 	a->need_draw = true;
+}
+
+static void trace_key(struct app *a, uint32_t code, enum tl_key_event ev,
+	const struct tl_key_modes *m, const char *seq, size_t n,
+	const char *note)
+{
+	char line[512];
+	tl_key_trace_format(line, sizeof(line), code, tl_kbd_mods(&a->kbd),
+		ev, m, seq, n, note);
+	trace_append_line(a, line);
+}
+
+static void trace_ime(struct app *a, const char *kind, const char *text,
+	size_t len, int32_t cbeg, int32_t cend)
+{
+	char line[512];
+	tl_key_trace_ime(line, sizeof(line), kind, text, len, cbeg, cend);
+	trace_append_line(a, line);
 }
 
 static struct tl_key_modes key_modes(const struct app *a)
@@ -816,11 +896,57 @@ static void on_repeat_info(void *ud, int32_t rate, int32_t delay)
 	a->repeat_delay = delay < 0 ? 0 : delay;
 }
 
+static void on_ime_preedit(void *ud, const char *text, int32_t cursor_begin,
+	int32_t cursor_end)
+{
+	struct app *a = ud;
+	bool had = a->preedit_text != NULL && a->preedit_text[0] != '\0';
+	bool has = text != NULL && text[0] != '\0';
+	if (!had && !has)
+		return;
+	if (a->preedit_y0 >= 0 && a->preedit_y1 >= a->preedit_y0)
+		mark_rows_dirty(a, a->preedit_y0, a->preedit_y1);
+	mark_rows_dirty(a, a->term.cy, a->term.cy);
+	free(a->preedit_text);
+	a->preedit_text = NULL;
+	if (has) {
+		size_t n = strlen(text);
+		a->preedit_text = malloc(n + 1);
+		if (a->preedit_text != NULL)
+			memcpy(a->preedit_text, text, n + 1);
+		a->preedit_cbeg = cursor_begin;
+		a->preedit_cend = cursor_end;
+		tl_compose_reset(&a->compose);
+		if (a->keys_mode)
+			trace_ime(a, "preedit", text, n, cursor_begin,
+				cursor_end);
+	} else {
+		a->preedit_cbeg = 0;
+		a->preedit_cend = 0;
+		if (a->keys_mode)
+			trace_ime(a, "preedit", NULL, 0, 0, 0);
+	}
+	a->need_draw = true;
+}
+
+static void on_ime_commit(void *ud, const char *text, size_t len)
+{
+	struct app *a = ud;
+	if (text == NULL || len == 0)
+		return;
+	tl_term_reset_view(&a->term);
+	tl_compose_reset(&a->compose);
+	(void)tl_pty_queue(&a->pty, text, len);
+	if (a->keys_mode)
+		trace_ime(a, "commit", text, len, 0, 0);
+}
+
 static const struct tl_window_events events = {
 	on_configure, on_close, on_frame, on_key, on_focus_in, on_focus_out,
 	on_modifiers, on_repeat_info, on_scale,
 	on_pointer_enter, on_pointer_leave, on_pointer_motion,
 	on_pointer_button, on_pointer_axis,
+	on_ime_preedit, on_ime_commit,
 };
 
 /* Read what the program wrote. Returns false at end of file. */
@@ -924,6 +1050,7 @@ int main(int argc, char **argv)
 	setup_locale();
 	static struct app a;
 	a.paste_fd = -1;
+	a.preedit_y0 = a.preedit_y1 = -1;
 	a.keys_mode = keys_mode;
 	if (a.keys_mode) {
 		a.keys_bar_rows = TL_KEYS_BAR_ROWS;
@@ -1097,6 +1224,7 @@ int main(int argc, char **argv)
 		kill(-a.pty.pid, SIGHUP);
 	if (a.paste_fd >= 0)
 		close(a.paste_fd);
+	free(a.preedit_text);
 	free(a.buf_dirty[0]);
 	free(a.buf_dirty[1]);
 	tl_window_close(&a.win);

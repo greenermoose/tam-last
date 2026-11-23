@@ -35,6 +35,10 @@ struct tl_window_events {
 		uint32_t time);
 	void (*pointer_axis)(void *ud, uint32_t axis, double value,
 		int32_t v120);
+	/* Input method (text-input-v3) events. text == NULL clears preedit. */
+	void (*ime_preedit)(void *ud, const char *text, int32_t cursor_begin,
+		int32_t cursor_end);
+	void (*ime_commit)(void *ud, const char *text, size_t len);
 };
 
 struct tl_window {
@@ -44,6 +48,7 @@ struct tl_window {
 	uint32_t cursor_shape_mgr, cursor_shape_dev;
 	uint32_t data_mgr, data_device;
 	uint32_t primary_mgr, primary_device;
+	uint32_t text_input_mgr, text_input;
 	int dest_w, dest_h; /* the viewport destination last set */
 	uint32_t compositor_version;
 	int32_t buffer_scale;
@@ -67,6 +72,18 @@ struct tl_window {
 	char pending_prim_mime[64], prim_mime[64];
 	char *prim_text;
 	size_t prim_len;
+	/* Input method (text-input-v3) double-buffered state. */
+	bool ti_focused;
+	bool ti_enabled;
+	uint32_t ti_commit_serial;
+	char *ti_pending_preedit;
+	int32_t ti_pending_cursor_begin, ti_pending_cursor_end;
+	bool ti_has_pending_preedit;
+	char *ti_pending_commit;
+	bool ti_has_pending_commit;
+	int32_t ti_rect_x, ti_rect_y, ti_rect_w, ti_rect_h;
+	bool ti_rect_valid;
+	bool ti_rect_sent;
 	bool synced;
 	bool configured;
 	int pending_w, pending_h;
@@ -114,5 +131,11 @@ void tl_window_set_primary(struct tl_window *win, const char *text, size_t len);
 /* Start receiving clipboard or primary selection into a non-blocking pipe.
  * Returns the read fd, or -1 if no selection is available. */
 int tl_window_paste(struct tl_window *win, bool primary);
+
+/* Report the cursor cell rectangle in surface-local logical pixels to an
+ * active text-input-v3 input method (deduplicated). */
+void tl_window_set_cursor_rect(struct tl_window *win, int32_t x, int32_t y,
+	int32_t width, int32_t height);
+bool tl_window_has_text_input(const struct tl_window *win);
 
 #endif

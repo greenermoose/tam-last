@@ -111,6 +111,53 @@ int main(int argc, char **argv)
 		tl_render_bar(&font, &pal, bpx, w, bh, pad, 99, 4, "clipped");
 		free(bpx);
 	}
+
+	/* IME preedit overlay rendering: underline, selection highlight, bar/hidden cursor. */
+	{
+		struct tl_term pt;
+		CHECK(tl_term_init(&pt, 6, 2) == 0);
+		int pw = 6 * font.cell_w + 2 * pad;
+		int ph = 2 * font.cell_h + 2 * pad;
+		uint32_t *ppx = calloc((size_t)pw * (size_t)ph, sizeof(*ppx));
+		CHECK(ppx != NULL);
+		tl_render(&pt, &font, &pal, ppx, pw, ph, pad, true);
+
+		/* Empty/NULL preedit is a no-op returning -1. */
+		struct tl_preedit pe_empty = { NULL, 0, 0 };
+		CHECK(tl_render_preedit(&pt, &font, &pal, ppx, pw, ph, pad, &pe_empty) == -1);
+
+		/* Normal preedit with selection on second char ("AA", sel 1..2). */
+		struct tl_preedit pe_sel = { "AA", 1, 2 };
+		CHECK(tl_render_preedit(&pt, &font, &pal, ppx, pw, ph, pad, &pe_sel) == 0);
+		int line_h = font.cell_h / 14 > 0 ? font.cell_h / 14 : 1;
+		int ul_y = pad + font.baseline + line_h;
+		/* Cell 0: normal bg, fg glyph + fg underline. */
+		CHECK(ppx[cy * pw + pad + font.cell_w / 2] == pal.fg);
+		CHECK(ppx[ul_y * pw + pad + font.cell_w / 2] == pal.fg);
+		/* Cell 1: inverted (fg background, bg glyph). */
+		CHECK(ppx[pad * pw + pad + font.cell_w + 1] == pal.fg);
+		CHECK(ppx[cy * pw + pad + font.cell_w + font.cell_w / 2] == pal.bg);
+
+		/* Bar cursor at end of preedit (cursor_begin == cursor_end == 1). */
+		tl_render(&pt, &font, &pal, ppx, pw, ph, pad, false);
+		struct tl_preedit pe_bar = { "A", 1, 1 };
+		CHECK(tl_render_preedit(&pt, &font, &pal, ppx, pw, ph, pad, &pe_bar) == 0);
+		CHECK(ppx[cy * pw + pad + font.cell_w] == pal.cursor);
+
+		/* Hidden cursor (-1, -1) draws no bar cursor at cell 1. */
+		tl_render(&pt, &font, &pal, ppx, pw, ph, pad, false);
+		struct tl_preedit pe_hid = { "A", -1, -1 };
+		CHECK(tl_render_preedit(&pt, &font, &pal, ppx, pw, ph, pad, &pe_hid) == 0);
+		CHECK(ppx[cy * pw + pad + font.cell_w] == pal.bg);
+
+		/* Wrapping across row boundary returns row 1. */
+		feed(&pt, "12345"); /* cx == 5 */
+		struct tl_preedit pe_wrap = { "AB", 0, 0 };
+		CHECK(tl_render_preedit(&pt, &font, &pal, ppx, pw, ph, pad, &pe_wrap) == 1);
+
+		free(ppx);
+		tl_term_free(&pt);
+	}
 	free(px);
 	tl_term_free(&t);
 	tl_font_close(&font);

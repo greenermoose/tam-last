@@ -49,6 +49,8 @@ enum tl_iface {
 	TL_IF_PRIMARY_DEVICE,
 	TL_IF_PRIMARY_SOURCE,
 	TL_IF_PRIMARY_OFFER,
+	TL_IF_TEXT_INPUT_MGR,
+	TL_IF_TEXT_INPUT,
 	/* Destroyed by us, waiting for the server's delete_id. */
 	TL_IF_ZOMBIE
 };

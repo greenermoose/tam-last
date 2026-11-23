@@ -61,6 +61,10 @@ static void on_global(struct tl_window *win, struct tl_event *ev)
 		   win->primary_mgr == 0) {
 		win->primary_mgr = tl_registry_bind(w, win->registry, name,
 			iface, 1, TL_IF_PRIMARY_MGR, win);
+	} else if (strcmp(iface, "zwp_text_input_manager_v3") == 0 &&
+		   win->text_input_mgr == 0) {
+		win->text_input_mgr = tl_registry_bind(w, win->registry, name,
+			iface, 1, TL_IF_TEXT_INPUT_MGR, win);
 	}
 }
 
@@ -269,6 +273,144 @@ static void write_selection_fd(int fd, const char *data, size_t len)
 	close(fd);
 }
 
+static char *dup_text(const char *text, size_t len)
+{
+	char *p = malloc(len + 1);
+	if (p == NULL)
+		return NULL;
+	if (len > 0)
+		memcpy(p, text, len);
+	p[len] = '\0';
+	return p;
+}
+
+static void ti_reset_pending(struct tl_window *win)
+{
+	free(win->ti_pending_preedit);
+	win->ti_pending_preedit = NULL;
+	win->ti_pending_cursor_begin = 0;
+	win->ti_pending_cursor_end = 0;
+	win->ti_has_pending_preedit = false;
+	free(win->ti_pending_commit);
+	win->ti_pending_commit = NULL;
+	win->ti_has_pending_commit = false;
+}
+
+static void on_text_input(struct tl_window *win, struct tl_event *ev)
+{
+	const struct tl_window_events *cb = win->ev;
+	struct tl_wire *w = &win->wire;
+
+	switch (ev->opcode) {
+	case TL_TEXT_INPUT_ENTER: {
+		uint32_t surface = tl_ev_u32(ev);
+		if (ev->bad || surface != win->surface)
+			break;
+		ti_reset_pending(win);
+		win->ti_focused = true;
+		tl_text_input_enable(w, win->text_input);
+		tl_text_input_set_content_type(w, win->text_input,
+			TL_TEXT_INPUT_HINT_NONE, TL_TEXT_INPUT_PURPOSE_TERMINAL);
+		if (win->ti_rect_valid) {
+			tl_text_input_set_cursor_rectangle(w, win->text_input,
+				win->ti_rect_x, win->ti_rect_y,
+				win->ti_rect_w, win->ti_rect_h);
+			win->ti_rect_sent = true;
+		} else {
+			win->ti_rect_sent = false;
+		}
+		tl_text_input_commit(w, win->text_input);
+		win->ti_commit_serial++;
+		win->ti_enabled = true;
+		break;
+	}
+	case TL_TEXT_INPUT_LEAVE: {
+		(void)tl_ev_u32(ev); /* surface */
+		if (ev->bad)
+			break;
+		ti_reset_pending(win);
+		if (win->ti_focused) {
+			win->ti_focused = false;
+			win->ti_enabled = false;
+			win->ti_rect_sent = false;
+			if (cb->ime_preedit != NULL)
+				cb->ime_preedit(win->ud, NULL, 0, 0);
+		}
+		break;
+	}
+	case TL_TEXT_INPUT_PREEDIT_STRING: {
+		const char *text = tl_ev_str(ev);
+		int32_t cbeg = tl_ev_i32(ev);
+		int32_t cend = tl_ev_i32(ev);
+		if (ev->bad)
+			break;
+		free(win->ti_pending_preedit);
+		win->ti_pending_preedit = (text != NULL && text[0] != '\0') ?
+			dup_text(text, strlen(text)) : NULL;
+		win->ti_pending_cursor_begin = cbeg;
+		win->ti_pending_cursor_end = cend;
+		win->ti_has_pending_preedit = true;
+		break;
+	}
+	case TL_TEXT_INPUT_COMMIT_STRING: {
+		const char *text = tl_ev_str(ev);
+		if (ev->bad)
+			break;
+		free(win->ti_pending_commit);
+		win->ti_pending_commit = (text != NULL && text[0] != '\0') ?
+			dup_text(text, strlen(text)) : NULL;
+		win->ti_has_pending_commit = true;
+		break;
+	}
+	case TL_TEXT_INPUT_DELETE_SURROUNDING_TEXT:
+		(void)tl_ev_u32(ev); /* before_length */
+		(void)tl_ev_u32(ev); /* after_length */
+		break;
+	case TL_TEXT_INPUT_DONE: {
+		uint32_t serial = tl_ev_u32(ev);
+		if (ev->bad)
+			break;
+		char *commit = win->ti_pending_commit;
+		bool has_commit = win->ti_has_pending_commit;
+		char *preedit = win->ti_pending_preedit;
+		bool has_preedit = win->ti_has_pending_preedit;
+		int32_t cbeg = win->ti_pending_cursor_begin;
+		int32_t cend = win->ti_pending_cursor_end;
+		win->ti_pending_commit = NULL;
+		win->ti_has_pending_commit = false;
+		win->ti_pending_preedit = NULL;
+		win->ti_has_pending_preedit = false;
+		win->ti_pending_cursor_begin = 0;
+		win->ti_pending_cursor_end = 0;
+
+		if (has_commit && commit != NULL && commit[0] != '\0' &&
+		    cb->ime_commit != NULL)
+			cb->ime_commit(win->ud, commit, strlen(commit));
+		if (cb->ime_preedit != NULL) {
+			if (has_preedit && preedit != NULL)
+				cb->ime_preedit(win->ud, preedit, cbeg, cend);
+			else
+				cb->ime_preedit(win->ud, NULL, 0, 0);
+		}
+		free(commit);
+		free(preedit);
+
+		if (serial == win->ti_commit_serial && win->ti_focused &&
+		    win->ti_enabled && win->ti_rect_valid && !win->ti_rect_sent) {
+			tl_text_input_set_cursor_rectangle(w, win->text_input,
+				win->ti_rect_x, win->ti_rect_y,
+				win->ti_rect_w, win->ti_rect_h);
+			tl_text_input_commit(w, win->text_input);
+			win->ti_commit_serial++;
+			win->ti_rect_sent = true;
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
+
 static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 {
 	const struct tl_object *obj = tl_wire_object(&win->wire, ev->object);
@@ -458,6 +600,10 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 				close(fd);
 		}
 		break;
+	case TL_IF_TEXT_INPUT:
+		if (ev->object == win->text_input)
+			on_text_input(win, ev);
+		break;
 	case TL_IF_WM_BASE:
 		if (ev->opcode == TL_WM_BASE_PING) {
 			uint32_t serial = tl_ev_u32(ev);
@@ -642,6 +788,9 @@ int tl_window_open(struct tl_window *win, const char *title,
 	if (win->seat != 0 && win->primary_mgr != 0)
 		win->primary_device = tl_primary_mgr_get_device(w,
 			win->primary_mgr, win->seat, win);
+	if (win->seat != 0 && win->text_input_mgr != 0)
+		win->text_input = tl_text_input_mgr_get(w, win->text_input_mgr,
+			win->seat, win);
 	win->cursor_shape = TL_CURSOR_SHAPE_TEXT;
 	tl_toplevel_set_title(w, win->toplevel, title);
 	tl_toplevel_set_app_id(w, win->toplevel, app_id);
@@ -654,6 +803,11 @@ int tl_window_open(struct tl_window *win, const char *title,
 
 void tl_window_close(struct tl_window *win)
 {
+	ti_reset_pending(win);
+	if (win->text_input != 0 && win->wire.fd >= 0) {
+		tl_text_input_destroy(&win->wire, win->text_input);
+		win->text_input = 0;
+	}
 	free(win->clip_text);
 	free(win->prim_text);
 	win->clip_text = win->prim_text = NULL;
@@ -751,17 +905,6 @@ void tl_window_set_cursor(struct tl_window *win, uint32_t shape)
 			win->pointer_enter_serial, shape);
 }
 
-static char *dup_text(const char *text, size_t len)
-{
-	char *p = malloc(len + 1);
-	if (p == NULL)
-		return NULL;
-	if (len > 0)
-		memcpy(p, text, len);
-	p[len] = '\0';
-	return p;
-}
-
 void tl_window_set_clipboard(struct tl_window *win, const char *text,
 	size_t len)
 {
@@ -830,4 +973,35 @@ int tl_window_paste(struct tl_window *win, bool primary)
 		tl_data_offer_receive(&win->wire, offer, mime, p[1]);
 	close(p[1]);
 	return p[0];
+}
+
+void tl_window_set_cursor_rect(struct tl_window *win, int32_t x, int32_t y,
+	int32_t width, int32_t height)
+{
+	if (width < 0)
+		width = 0;
+	if (height < 0)
+		height = 0;
+	if (win->ti_rect_valid && win->ti_rect_sent &&
+	    win->ti_rect_x == x && win->ti_rect_y == y &&
+	    win->ti_rect_w == width && win->ti_rect_h == height)
+		return;
+	win->ti_rect_x = x;
+	win->ti_rect_y = y;
+	win->ti_rect_w = width;
+	win->ti_rect_h = height;
+	win->ti_rect_valid = true;
+	win->ti_rect_sent = false;
+	if (win->text_input != 0 && win->ti_focused && win->ti_enabled) {
+		tl_text_input_set_cursor_rectangle(&win->wire, win->text_input,
+			x, y, width, height);
+		tl_text_input_commit(&win->wire, win->text_input);
+		win->ti_commit_serial++;
+		win->ti_rect_sent = true;
+	}
+}
+
+bool tl_window_has_text_input(const struct tl_window *win)
+{
+	return win->text_input != 0;
 }

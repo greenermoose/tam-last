@@ -632,6 +632,15 @@ int main(void)
 			TL_KEY_PRESS, &m_intl, NULL, 0, "dead_acute");
 		CHECK(strstr(line, "char=dead_acute") != NULL);
 		CHECK(strstr(line, "[dead_acute]") != NULL);
+
+		/* --keys IME trace formatting (text-input-v3). */
+		tl_key_trace_ime(line, sizeof(line), "commit", "\xe3\x81\x82", 3, 0, 0);
+		CHECK(strstr(line, "ime commit pty=") != NULL);
+		CHECK(strstr(line, "[e3 81 82]") != NULL);
+		tl_key_trace_ime(line, sizeof(line), "preedit", "nihao", 5, 0, 5);
+		CHECK(strcmp(line, "ime preedit cursor=0..5 text=\"nihao\"") == 0);
+		tl_key_trace_ime(line, sizeof(line), "preedit", NULL, 0, 0, 0);
+		CHECK(strcmp(line, "ime preedit (clear)") == 0);
 	}
 
 	CHECK_DONE("test_keys");
