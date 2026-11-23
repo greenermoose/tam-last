@@ -3,48 +3,56 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-23, with W15
+Updated: 2026-11-23, with W16
 
 
 STATE
 
-  Version 0.2.2 on branch dev (Phase P3; Fred accepted 0.2.2 on
-  2026-11-23, W15). Implemented and verified:
-  - Incremental scrollback search (include/tam-last/search.h,
-    src/search.c, Ctrl+Shift+R): smart-case UTF-8 and wide-character
-    matching across scrollback and live screen, match highlighting,
-    wrap-around Ctrl+R/Ctrl+S/Up/Down navigation, Enter to select to
-    primary, Esc to restore view_offset.
-  - Keyboard URL mode (include/tam-last/url.h, src/url.c, Ctrl+Shift+O):
-    detects visible OSC 8 hyperlinks and plain-text URLs with balanced
-    punctuation trimming and scheme allowlisting, overlays prefix-free
-    home-row hint labels, opens via xdg-open (Shift+key copies instead),
-    plus Ctrl+Left-Click on hovered OSC 8 links.
-  - Desktop notifications (OSC 777 and OSC 99 in src/osc.c,
-    include/tam-last/action.h, src/action.c): dispatched via notify-send
-    (integrating with Quickshell's freedesktop notification service) with
-    a 4-process concurrency cap and 3000 ms monotonic deadline; poll()
-    stays timeout-free when idle. Policy notify=unfocused|yes|no in
-    tam-last.ini (default unfocused) and --notify on the CLI.
-  - Interactive sandbox/demo-daily (option c in sandbox/play).
+  Version 0.2.3 on branch dev (Phase P3 complete; Fred accepted 0.2.3 on
+  2026-11-23, W16). Implemented and verified:
+  - Shared Wayland display & multi-window layer (include/tam-last/window.h,
+    src/window.c, include/tam-last/proto.h, src/wl/proto.c): split
+    tl_display (one Wayland connection, globals, seat focus routing for
+    keyboard/pointer/IME, clipboard/primary selection, repeat info) from
+    per-window tl_window (surfaces, toplevels, viewports, fractional scale,
+    SHM buffers, clean per-window Wayland object destruction).
+  - Shared font cache (include/tam-last/font.h, src/font/font.c):
+    reference-counted tl_font_cache keyed by font paths, point size, and
+    dpi with warm LRU retention (up to 8 unreferenced entries) so new
+    windows reuse mapped TTF files, sibling/fallback faces, and glyph
+    masks immediately.
+  - Multi-window PTY isolation (include/tam-last/pty.h, src/pty.c):
+    tl_pty_spawn_in applies client cwd, SHELL, and $TERM in the child
+    without mutating the server process.
+  - Client/server Unix-socket IPC (include/tam-last/ipc.h, src/ipc.c):
+    length-prefixed, bounds-checked protocol over
+    $XDG_RUNTIME_DIR/tam-last-<WAYLAND_DISPLAY>.sock (or -S/--socket),
+    owner-only (0600) permissions, live-server vs stale-socket detection,
+    --server, --client (and installed tam-last-client symlink), and
+    -N/--no-wait. Fails with a clear error if no server is running.
+  - Unified multi-window poll() event loop in src/main.c (timeout-free
+    when idle, bounded client handshake deadlines, clean SIGINT/SIGTERM
+    shutdown and socket unlinking).
+  - Interactive sandbox/demo-server (option d in sandbox/play).
 
-  make test (test_wire 173, test_vt 431, test_ttf 3036, test_keys 266,
-  test_render 91, test_config 62, test_modes 77, version 0.2.2, terminfo
-  tam-last & tam-last-direct, headless tam-pane), ASan/UBSan sanitize
-  tests, readelf -d (libc and libm only), sh -n, and staged
-  install/uninstall all pass with zero warnings.
+  make test (test_wire 192, test_vt 431, test_ttf 3036, test_keys 266,
+  test_render 91, test_config 62, test_modes 77, test_ipc 72, version
+  0.2.3, terminfo tam-last & tam-last-direct, headless tam-pane standalone
+  + multi-window server/client), make sanitize (ASan/UBSan + headless),
+  readelf -d (libc and libm only), sh -n, and staged install/uninstall
+  (including tam-last-client symlink) all pass with zero warnings.
 
 
 NEXT
 
-  1. Phase P3, 0.2.3 (server mode: one process, many windows, shared font
-     cache, instant start; see plans/P3-daily-parity.md).
+  1. Phase P4, 0.3.0 (dogfood: package tam-last in tamlinux-packages;
+     see plans/P4-dogfood.md).
 
 
 WAITING FOR FRED
 
   - Open points in the plans: kitty decoding in libtam (P2); Sixel/kitty
-    graphics (P3).
+    graphics (P3); when tam-last enters Tamlinux (P4).
     (Layouts stay in tam-last for now and will lift into libtam when
     tam-pane reaches P6.)
 

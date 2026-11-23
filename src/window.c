@@ -1,4 +1,5 @@
-/* The toplevel window: registry, xdg-shell, keyboard, frame pacing. */
+/* Shared Wayland display connection and per-window xdg-shell toplevels:
+ * registry, seat focus routing, clipboard/primary, IME, and frame pacing. */
 #include "tam-last/window.h"
 
 #include <errno.h>
@@ -16,65 +17,74 @@ static uint32_t min_u32(uint32_t a, uint32_t b)
 	return a < b ? a : b;
 }
 
-static void on_global(struct tl_window *win, struct tl_event *ev)
+static struct tl_window *surface_window(const struct tl_display *dpy,
+	uint32_t surface_id)
+{
+	const struct tl_object *obj = tl_wire_object(&dpy->wire, surface_id);
+	if (obj == NULL || obj->iface != TL_IF_SURFACE)
+		return NULL;
+	return obj->data;
+}
+
+static void on_global(struct tl_display *dpy, struct tl_event *ev)
 {
 	uint32_t name = tl_ev_u32(ev);
 	const char *iface = tl_ev_str(ev);
 	uint32_t version = tl_ev_u32(ev);
-	struct tl_wire *w = &win->wire;
+	struct tl_wire *w = &dpy->wire;
 
 	if (ev->bad || iface == NULL)
 		return;
-	if (strcmp(iface, "wl_compositor") == 0 && win->compositor == 0) {
+	if (strcmp(iface, "wl_compositor") == 0 && dpy->compositor == 0) {
 		if (version >= 4) {
-			win->compositor_version = min_u32(version, 6);
-			win->compositor = tl_registry_bind(w, win->registry, name,
-				iface, win->compositor_version, TL_IF_COMPOSITOR,
-				win);
+			dpy->compositor_version = min_u32(version, 6);
+			dpy->compositor = tl_registry_bind(w, dpy->registry,
+				name, iface, dpy->compositor_version,
+				TL_IF_COMPOSITOR, dpy);
 		}
-	} else if (strcmp(iface, "wl_shm") == 0 && win->shm == 0) {
-		win->shm = tl_registry_bind(w, win->registry, name, iface, 1,
-			TL_IF_SHM, win);
-	} else if (strcmp(iface, "wl_seat") == 0 && win->seat == 0) {
-		win->seat_version = min_u32(version, 8);
-		win->seat = tl_registry_bind(w, win->registry, name, iface,
-			win->seat_version, TL_IF_SEAT, win);
-	} else if (strcmp(iface, "xdg_wm_base") == 0 && win->wm_base == 0) {
-		win->wm_base = tl_registry_bind(w, win->registry, name, iface, 1,
-			TL_IF_WM_BASE, win);
-	} else if (strcmp(iface, "wp_viewporter") == 0 && win->viewporter == 0) {
-		win->viewporter = tl_registry_bind(w, win->registry, name, iface,
-			1, TL_IF_VIEWPORTER, win);
+	} else if (strcmp(iface, "wl_shm") == 0 && dpy->shm == 0) {
+		dpy->shm = tl_registry_bind(w, dpy->registry, name, iface, 1,
+			TL_IF_SHM, dpy);
+	} else if (strcmp(iface, "wl_seat") == 0 && dpy->seat == 0) {
+		dpy->seat_version = min_u32(version, 8);
+		dpy->seat = tl_registry_bind(w, dpy->registry, name, iface,
+			dpy->seat_version, TL_IF_SEAT, dpy);
+	} else if (strcmp(iface, "xdg_wm_base") == 0 && dpy->wm_base == 0) {
+		dpy->wm_base = tl_registry_bind(w, dpy->registry, name, iface,
+			1, TL_IF_WM_BASE, dpy);
+	} else if (strcmp(iface, "wp_viewporter") == 0 && dpy->viewporter == 0) {
+		dpy->viewporter = tl_registry_bind(w, dpy->registry, name,
+			iface, 1, TL_IF_VIEWPORTER, dpy);
 	} else if (strcmp(iface, "wp_fractional_scale_manager_v1") == 0 &&
-		   win->fractional_manager == 0) {
-		win->fractional_manager = tl_registry_bind(w, win->registry, name,
-			iface, 1, TL_IF_FRACTIONAL_MANAGER, win);
+		   dpy->fractional_manager == 0) {
+		dpy->fractional_manager = tl_registry_bind(w, dpy->registry,
+			name, iface, 1, TL_IF_FRACTIONAL_MANAGER, dpy);
 	} else if (strcmp(iface, "wp_cursor_shape_manager_v1") == 0 &&
-		   win->cursor_shape_mgr == 0) {
-		win->cursor_shape_mgr = tl_registry_bind(w, win->registry, name,
-			iface, 1, TL_IF_CURSOR_SHAPE_MGR, win);
+		   dpy->cursor_shape_mgr == 0) {
+		dpy->cursor_shape_mgr = tl_registry_bind(w, dpy->registry, name,
+			iface, 1, TL_IF_CURSOR_SHAPE_MGR, dpy);
 	} else if (strcmp(iface, "wl_data_device_manager") == 0 &&
-		   win->data_mgr == 0) {
-		win->data_mgr = tl_registry_bind(w, win->registry, name, iface,
-			min_u32(version, 3), TL_IF_DATA_DEVICE_MGR, win);
+		   dpy->data_mgr == 0) {
+		dpy->data_mgr = tl_registry_bind(w, dpy->registry, name, iface,
+			min_u32(version, 3), TL_IF_DATA_DEVICE_MGR, dpy);
 	} else if (strcmp(iface, "zwp_primary_selection_device_manager_v1") == 0 &&
-		   win->primary_mgr == 0) {
-		win->primary_mgr = tl_registry_bind(w, win->registry, name,
-			iface, 1, TL_IF_PRIMARY_MGR, win);
+		   dpy->primary_mgr == 0) {
+		dpy->primary_mgr = tl_registry_bind(w, dpy->registry, name,
+			iface, 1, TL_IF_PRIMARY_MGR, dpy);
 	} else if (strcmp(iface, "zwp_text_input_manager_v3") == 0 &&
-		   win->text_input_mgr == 0) {
-		win->text_input_mgr = tl_registry_bind(w, win->registry, name,
-			iface, 1, TL_IF_TEXT_INPUT_MGR, win);
+		   dpy->text_input_mgr == 0) {
+		dpy->text_input_mgr = tl_registry_bind(w, dpy->registry, name,
+			iface, 1, TL_IF_TEXT_INPUT_MGR, dpy);
 	}
 }
 
-static int on_display(struct tl_window *win, struct tl_event *ev)
+static int on_display(struct tl_display *dpy, struct tl_event *ev)
 {
 	if (ev->opcode == TL_DISPLAY_ERROR) {
 		uint32_t object = tl_ev_u32(ev);
 		uint32_t code = tl_ev_u32(ev);
 		const char *msg = tl_ev_str(ev);
-		snprintf(win->err, sizeof(win->err),
+		snprintf(dpy->err, sizeof(dpy->err),
 			"compositor reported error %u on object %u: %s", code,
 			object, msg != NULL ? msg : "(no message)");
 		return -1;
@@ -82,15 +92,13 @@ static int on_display(struct tl_window *win, struct tl_event *ev)
 	if (ev->opcode == TL_DISPLAY_DELETE_ID) {
 		uint32_t id = tl_ev_u32(ev);
 		if (!ev->bad)
-			tl_wire_free_id(&win->wire, id);
+			tl_wire_free_id(&dpy->wire, id);
 	}
 	return 0;
 }
 
-static void on_keyboard(struct tl_window *win, struct tl_event *ev)
+static void on_keyboard(struct tl_display *dpy, struct tl_event *ev)
 {
-	const struct tl_window_events *cb = win->ev;
-
 	switch (ev->opcode) {
 	case TL_KEYBOARD_KEYMAP: {
 		/* tam-last maps evdev codes with its own tables (see
@@ -103,22 +111,34 @@ static void on_keyboard(struct tl_window *win, struct tl_event *ev)
 	}
 	case TL_KEYBOARD_ENTER: {
 		size_t len;
-		(void)tl_ev_u32(ev);
-		(void)tl_ev_u32(ev);
+		(void)tl_ev_u32(ev); /* serial */
+		uint32_t surf = tl_ev_u32(ev);
 		const void *keys = tl_ev_array(ev, &len);
 		if (ev->bad)
+			break;
+		struct tl_window *win = surface_window(dpy, surf);
+		if (dpy->kbd_focus != NULL && dpy->kbd_focus != win &&
+		    dpy->kbd_focus->ev->focus_out != NULL)
+			dpy->kbd_focus->ev->focus_out(dpy->kbd_focus->ud);
+		dpy->kbd_focus = win;
+		if (win == NULL)
 			break;
 		uint32_t codes[64];
 		size_t n = len / 4 < 64 ? len / 4 : 64;
 		memcpy(codes, keys, n * 4);
-		if (cb->focus_in != NULL)
-			cb->focus_in(win->ud, codes, n);
+		if (win->ev->focus_in != NULL)
+			win->ev->focus_in(win->ud, codes, n);
 		break;
 	}
-	case TL_KEYBOARD_LEAVE:
-		if (cb->focus_out != NULL)
-			cb->focus_out(win->ud);
+	case TL_KEYBOARD_LEAVE: {
+		(void)tl_ev_u32(ev); /* serial */
+		(void)tl_ev_u32(ev); /* surface */
+		struct tl_window *win = dpy->kbd_focus;
+		dpy->kbd_focus = NULL;
+		if (!ev->bad && win != NULL && win->ev->focus_out != NULL)
+			win->ev->focus_out(win->ud);
 		break;
+	}
 	case TL_KEYBOARD_KEY: {
 		uint32_t serial = tl_ev_u32(ev);
 		(void)tl_ev_u32(ev); /* time */
@@ -127,9 +147,10 @@ static void on_keyboard(struct tl_window *win, struct tl_event *ev)
 		/* state 2 is "repeated" (wl_seat v10); we repeat ourselves. */
 		if (!ev->bad && state != 2) {
 			if (state == 1)
-				win->last_serial = serial;
-			if (cb->key != NULL)
-				cb->key(win->ud, code, state == 1);
+				dpy->last_serial = serial;
+			struct tl_window *win = dpy->kbd_focus;
+			if (win != NULL && win->ev->key != NULL)
+				win->ev->key(win->ud, code, state == 1);
 		}
 		break;
 	}
@@ -138,51 +159,72 @@ static void on_keyboard(struct tl_window *win, struct tl_event *ev)
 		uint32_t depressed = tl_ev_u32(ev);
 		(void)tl_ev_u32(ev); /* latched */
 		uint32_t locked = tl_ev_u32(ev);
-		if (!ev->bad && cb->modifiers != NULL)
-			cb->modifiers(win->ud, depressed, locked);
+		struct tl_window *win = dpy->kbd_focus;
+		if (!ev->bad && win != NULL && win->ev->modifiers != NULL)
+			win->ev->modifiers(win->ud, depressed, locked);
 		break;
 	}
 	case TL_KEYBOARD_REPEAT_INFO: {
 		int32_t rate = tl_ev_i32(ev);
 		int32_t delay = tl_ev_i32(ev);
-		if (!ev->bad && cb->repeat_info != NULL)
-			cb->repeat_info(win->ud, rate, delay);
+		if (!ev->bad) {
+			dpy->repeat_rate = rate > 1000 ? 1000 : rate;
+			dpy->repeat_delay = delay < 0 ? 0 : delay;
+			struct tl_window *win = dpy->kbd_focus;
+			if (win != NULL && win->ev->repeat_info != NULL)
+				win->ev->repeat_info(win->ud, dpy->repeat_rate,
+					dpy->repeat_delay);
+		}
 		break;
 	}
 	}
 }
 
-static void on_pointer(struct tl_window *win, struct tl_event *ev)
+static void on_pointer(struct tl_display *dpy, struct tl_event *ev)
 {
-	const struct tl_window_events *cb = win->ev;
-
 	switch (ev->opcode) {
 	case TL_POINTER_ENTER: {
 		uint32_t serial = tl_ev_u32(ev);
-		(void)tl_ev_u32(ev); /* surface */
+		uint32_t surf = tl_ev_u32(ev);
 		double x = (double)tl_ev_i32(ev) / 256.0;
 		double y = (double)tl_ev_i32(ev) / 256.0;
 		if (ev->bad)
 			break;
-		win->pointer_enter_serial = serial;
-		if (win->cursor_shape_dev != 0 && win->cursor_shape != 0)
-			tl_cursor_shape_set(&win->wire, win->cursor_shape_dev,
+		struct tl_window *win = surface_window(dpy, surf);
+		if (dpy->ptr_focus != NULL && dpy->ptr_focus != win &&
+		    dpy->ptr_focus->ev->pointer_leave != NULL)
+			dpy->ptr_focus->ev->pointer_leave(dpy->ptr_focus->ud);
+		dpy->ptr_focus = win;
+		dpy->pointer_enter_serial = serial;
+		if (win == NULL)
+			break;
+		if (dpy->cursor_shape_dev != 0 && win->cursor_shape != 0)
+			tl_cursor_shape_set(&dpy->wire, dpy->cursor_shape_dev,
 				serial, win->cursor_shape);
-		if (cb->pointer_enter != NULL)
-			cb->pointer_enter(win->ud, x, y);
+		if (win->ev->pointer_enter != NULL)
+			win->ev->pointer_enter(win->ud, x, y);
 		break;
 	}
-	case TL_POINTER_LEAVE:
-		win->pointer_enter_serial = 0;
-		if (cb->pointer_leave != NULL)
-			cb->pointer_leave(win->ud);
+	case TL_POINTER_LEAVE: {
+		(void)tl_ev_u32(ev); /* serial */
+		(void)tl_ev_u32(ev); /* surface */
+		struct tl_window *win = dpy->ptr_focus;
+		dpy->ptr_focus = NULL;
+		dpy->pointer_enter_serial = 0;
+		dpy->axis_pending[0] = dpy->axis_pending[1] = false;
+		dpy->axis_val[0] = dpy->axis_val[1] = 0;
+		dpy->axis_v120[0] = dpy->axis_v120[1] = 0;
+		if (!ev->bad && win != NULL && win->ev->pointer_leave != NULL)
+			win->ev->pointer_leave(win->ud);
 		break;
+	}
 	case TL_POINTER_MOTION: {
 		(void)tl_ev_u32(ev); /* time */
 		double x = (double)tl_ev_i32(ev) / 256.0;
 		double y = (double)tl_ev_i32(ev) / 256.0;
-		if (!ev->bad && cb->pointer_motion != NULL)
-			cb->pointer_motion(win->ud, x, y);
+		struct tl_window *win = dpy->ptr_focus;
+		if (!ev->bad && win != NULL && win->ev->pointer_motion != NULL)
+			win->ev->pointer_motion(win->ud, x, y);
 		break;
 	}
 	case TL_POINTER_BUTTON: {
@@ -192,10 +234,11 @@ static void on_pointer(struct tl_window *win, struct tl_event *ev)
 		uint32_t state = tl_ev_u32(ev);
 		if (!ev->bad) {
 			if (state == 1)
-				win->last_serial = serial;
-			if (cb->pointer_button != NULL)
-				cb->pointer_button(win->ud, button, state == 1,
-					time);
+				dpy->last_serial = serial;
+			struct tl_window *win = dpy->ptr_focus;
+			if (win != NULL && win->ev->pointer_button != NULL)
+				win->ev->pointer_button(win->ud, button,
+					state == 1, time);
 		}
 		break;
 	}
@@ -204,17 +247,17 @@ static void on_pointer(struct tl_window *win, struct tl_event *ev)
 		uint32_t axis = tl_ev_u32(ev);
 		double val = (double)tl_ev_i32(ev) / 256.0;
 		if (!ev->bad && axis < 2) {
-			win->axis_pending[axis] = true;
-			win->axis_val[axis] += val;
+			dpy->axis_pending[axis] = true;
+			dpy->axis_val[axis] += val;
 		}
 		break;
 	}
 	case TL_POINTER_AXIS_DISCRETE: {
 		uint32_t axis = tl_ev_u32(ev);
 		int32_t disc = tl_ev_i32(ev);
-		if (!ev->bad && axis < 2 && win->seat_version < 8) {
-			win->axis_pending[axis] = true;
-			win->axis_v120[axis] += disc * 120;
+		if (!ev->bad && axis < 2 && dpy->seat_version < 8) {
+			dpy->axis_pending[axis] = true;
+			dpy->axis_v120[axis] += disc * 120;
 		}
 		break;
 	}
@@ -222,23 +265,25 @@ static void on_pointer(struct tl_window *win, struct tl_event *ev)
 		uint32_t axis = tl_ev_u32(ev);
 		int32_t v120 = tl_ev_i32(ev);
 		if (!ev->bad && axis < 2) {
-			win->axis_pending[axis] = true;
-			win->axis_v120[axis] += v120;
+			dpy->axis_pending[axis] = true;
+			dpy->axis_v120[axis] += v120;
 		}
 		break;
 	}
-	case TL_POINTER_FRAME:
+	case TL_POINTER_FRAME: {
+		struct tl_window *win = dpy->ptr_focus;
 		for (uint32_t i = 0; i < 2; i++) {
-			if (!win->axis_pending[i])
+			if (!dpy->axis_pending[i])
 				continue;
-			if (cb->pointer_axis != NULL)
-				cb->pointer_axis(win->ud, i, win->axis_val[i],
-					win->axis_v120[i]);
-			win->axis_pending[i] = false;
-			win->axis_val[i] = 0;
-			win->axis_v120[i] = 0;
+			if (win != NULL && win->ev->pointer_axis != NULL)
+				win->ev->pointer_axis(win->ud, i,
+					dpy->axis_val[i], dpy->axis_v120[i]);
+			dpy->axis_pending[i] = false;
+			dpy->axis_val[i] = 0;
+			dpy->axis_v120[i] = 0;
 		}
 		break;
+	}
 	default:
 		break;
 	}
@@ -284,57 +329,66 @@ static char *dup_text(const char *text, size_t len)
 	return p;
 }
 
-static void ti_reset_pending(struct tl_window *win)
+static void ti_reset_pending(struct tl_display *dpy)
 {
-	free(win->ti_pending_preedit);
-	win->ti_pending_preedit = NULL;
-	win->ti_pending_cursor_begin = 0;
-	win->ti_pending_cursor_end = 0;
-	win->ti_has_pending_preedit = false;
-	free(win->ti_pending_commit);
-	win->ti_pending_commit = NULL;
-	win->ti_has_pending_commit = false;
+	free(dpy->ti_pending_preedit);
+	dpy->ti_pending_preedit = NULL;
+	dpy->ti_pending_cursor_begin = 0;
+	dpy->ti_pending_cursor_end = 0;
+	dpy->ti_has_pending_preedit = false;
+	free(dpy->ti_pending_commit);
+	dpy->ti_pending_commit = NULL;
+	dpy->ti_has_pending_commit = false;
 }
 
-static void on_text_input(struct tl_window *win, struct tl_event *ev)
+static void on_text_input(struct tl_display *dpy, struct tl_event *ev)
 {
-	const struct tl_window_events *cb = win->ev;
-	struct tl_wire *w = &win->wire;
+	struct tl_wire *w = &dpy->wire;
 
 	switch (ev->opcode) {
 	case TL_TEXT_INPUT_ENTER: {
-		uint32_t surface = tl_ev_u32(ev);
-		if (ev->bad || surface != win->surface)
+		uint32_t surf = tl_ev_u32(ev);
+		if (ev->bad)
 			break;
-		ti_reset_pending(win);
-		win->ti_focused = true;
-		tl_text_input_enable(w, win->text_input);
-		tl_text_input_set_content_type(w, win->text_input,
+		struct tl_window *win = surface_window(dpy, surf);
+		ti_reset_pending(dpy);
+		if (dpy->ti_focus != NULL && dpy->ti_focus != win &&
+		    dpy->ti_focus->ev->ime_preedit != NULL)
+			dpy->ti_focus->ev->ime_preedit(dpy->ti_focus->ud, NULL,
+				0, 0);
+		dpy->ti_focus = win;
+		if (win == NULL) {
+			dpy->ti_enabled = false;
+			break;
+		}
+		tl_text_input_enable(w, dpy->text_input);
+		tl_text_input_set_content_type(w, dpy->text_input,
 			TL_TEXT_INPUT_HINT_NONE, TL_TEXT_INPUT_PURPOSE_TERMINAL);
 		if (win->ti_rect_valid) {
-			tl_text_input_set_cursor_rectangle(w, win->text_input,
+			tl_text_input_set_cursor_rectangle(w, dpy->text_input,
 				win->ti_rect_x, win->ti_rect_y,
 				win->ti_rect_w, win->ti_rect_h);
 			win->ti_rect_sent = true;
 		} else {
 			win->ti_rect_sent = false;
 		}
-		tl_text_input_commit(w, win->text_input);
-		win->ti_commit_serial++;
-		win->ti_enabled = true;
+		tl_text_input_commit(w, dpy->text_input);
+		dpy->ti_commit_serial++;
+		dpy->ti_enabled = true;
 		break;
 	}
 	case TL_TEXT_INPUT_LEAVE: {
 		(void)tl_ev_u32(ev); /* surface */
 		if (ev->bad)
 			break;
-		ti_reset_pending(win);
-		if (win->ti_focused) {
-			win->ti_focused = false;
-			win->ti_enabled = false;
+		ti_reset_pending(dpy);
+		struct tl_window *win = dpy->ti_focus;
+		dpy->ti_focus = NULL;
+		dpy->ti_enabled = false;
+		if (win != NULL) {
 			win->ti_rect_sent = false;
-			if (cb->ime_preedit != NULL)
-				cb->ime_preedit(win->ud, NULL, 0, 0);
+			if (win->ev->ime_preedit != NULL)
+				win->ev->ime_preedit(win->ud, NULL, 0, 0);
 		}
 		break;
 	}
@@ -344,66 +398,71 @@ static void on_text_input(struct tl_window *win, struct tl_event *ev)
 		int32_t cend = tl_ev_i32(ev);
 		if (ev->bad)
 			break;
-		free(win->ti_pending_preedit);
-		win->ti_pending_preedit = (text != NULL && text[0] != '\0') ?
+		free(dpy->ti_pending_preedit);
+		dpy->ti_pending_preedit = (text != NULL && text[0] != '\0') ?
 			dup_text(text, strlen(text)) : NULL;
-		win->ti_pending_cursor_begin = cbeg;
-		win->ti_pending_cursor_end = cend;
-		win->ti_has_pending_preedit = true;
+		dpy->ti_pending_cursor_begin = cbeg;
+		dpy->ti_pending_cursor_end = cend;
+		dpy->ti_has_pending_preedit = true;
 		break;
 	}
 	case TL_TEXT_INPUT_COMMIT_STRING: {
 		const char *text = tl_ev_str(ev);
 		if (ev->bad)
 			break;
-		free(win->ti_pending_commit);
-		win->ti_pending_commit = (text != NULL && text[0] != '\0') ?
+		free(dpy->ti_pending_commit);
+		dpy->ti_pending_commit = (text != NULL && text[0] != '\0') ?
 			dup_text(text, strlen(text)) : NULL;
-		win->ti_has_pending_commit = true;
+		dpy->ti_has_pending_commit = true;
 		break;
 	}
 	case TL_TEXT_INPUT_DELETE_SURROUNDING_TEXT:
-		(void)tl_ev_u32(ev); /* before_length */
-		(void)tl_ev_u32(ev); /* after_length */
+		(void)tl_ev_u32(ev);
+		(void)tl_ev_u32(ev);
 		break;
 	case TL_TEXT_INPUT_DONE: {
 		uint32_t serial = tl_ev_u32(ev);
 		if (ev->bad)
 			break;
-		char *commit = win->ti_pending_commit;
-		bool has_commit = win->ti_has_pending_commit;
-		char *preedit = win->ti_pending_preedit;
-		bool has_preedit = win->ti_has_pending_preedit;
-		int32_t cbeg = win->ti_pending_cursor_begin;
-		int32_t cend = win->ti_pending_cursor_end;
-		win->ti_pending_commit = NULL;
-		win->ti_has_pending_commit = false;
-		win->ti_pending_preedit = NULL;
-		win->ti_has_pending_preedit = false;
-		win->ti_pending_cursor_begin = 0;
-		win->ti_pending_cursor_end = 0;
+		char *commit = dpy->ti_pending_commit;
+		bool has_commit = dpy->ti_has_pending_commit;
+		char *preedit = dpy->ti_pending_preedit;
+		bool has_preedit = dpy->ti_has_pending_preedit;
+		int32_t cbeg = dpy->ti_pending_cursor_begin;
+		int32_t cend = dpy->ti_pending_cursor_end;
+		dpy->ti_pending_commit = NULL;
+		dpy->ti_has_pending_commit = false;
+		dpy->ti_pending_preedit = NULL;
+		dpy->ti_has_pending_preedit = false;
+		dpy->ti_pending_cursor_begin = 0;
+		dpy->ti_pending_cursor_end = 0;
 
-		if (has_commit && commit != NULL && commit[0] != '\0' &&
-		    cb->ime_commit != NULL)
-			cb->ime_commit(win->ud, commit, strlen(commit));
-		if (cb->ime_preedit != NULL) {
-			if (has_preedit && preedit != NULL)
-				cb->ime_preedit(win->ud, preedit, cbeg, cend);
-			else
-				cb->ime_preedit(win->ud, NULL, 0, 0);
+		struct tl_window *win = dpy->ti_focus;
+		if (win != NULL) {
+			if (has_commit && commit != NULL && commit[0] != '\0' &&
+			    win->ev->ime_commit != NULL)
+				win->ev->ime_commit(win->ud, commit,
+					strlen(commit));
+			if (win->ev->ime_preedit != NULL) {
+				if (has_preedit && preedit != NULL)
+					win->ev->ime_preedit(win->ud, preedit,
+						cbeg, cend);
+				else
+					win->ev->ime_preedit(win->ud, NULL, 0, 0);
+			}
+			if (serial == dpy->ti_commit_serial && dpy->ti_enabled &&
+			    win->ti_rect_valid && !win->ti_rect_sent) {
+				tl_text_input_set_cursor_rectangle(w,
+					dpy->text_input, win->ti_rect_x,
+					win->ti_rect_y, win->ti_rect_w,
+					win->ti_rect_h);
+				tl_text_input_commit(w, dpy->text_input);
+				dpy->ti_commit_serial++;
+				win->ti_rect_sent = true;
+			}
 		}
 		free(commit);
 		free(preedit);
-
-		if (serial == win->ti_commit_serial && win->ti_focused &&
-		    win->ti_enabled && win->ti_rect_valid && !win->ti_rect_sent) {
-			tl_text_input_set_cursor_rectangle(w, win->text_input,
-				win->ti_rect_x, win->ti_rect_y,
-				win->ti_rect_w, win->ti_rect_h);
-			tl_text_input_commit(w, win->text_input);
-			win->ti_commit_serial++;
-			win->ti_rect_sent = true;
-		}
 		break;
 	}
 	default:
@@ -411,28 +470,31 @@ static void on_text_input(struct tl_window *win, struct tl_event *ev)
 	}
 }
 
-static int dispatch_one(struct tl_window *win, struct tl_event *ev)
+static int dispatch_one(struct tl_display *dpy, struct tl_event *ev)
 {
-	const struct tl_object *obj = tl_wire_object(&win->wire, ev->object);
-	struct tl_wire *w = &win->wire;
+	const struct tl_object *obj = tl_wire_object(&dpy->wire, ev->object);
+	struct tl_wire *w = &dpy->wire;
 
 	if (obj == NULL)
 		return 0;
 	switch (obj->iface) {
 	case TL_IF_DISPLAY:
-		return on_display(win, ev);
+		return on_display(dpy, ev);
 	case TL_IF_REGISTRY:
 		if (ev->opcode == TL_REGISTRY_GLOBAL)
-			on_global(win, ev);
+			on_global(dpy, ev);
 		break;
 	case TL_IF_CALLBACK:
-		if (ev->object == win->sync_cb) {
-			win->sync_cb = 0;
-			win->synced = true;
-		} else if (ev->object == win->frame_cb) {
-			win->frame_cb = 0;
-			if (win->ev->frame != NULL)
-				win->ev->frame(win->ud);
+		if (ev->object == dpy->sync_cb) {
+			dpy->sync_cb = 0;
+			dpy->synced = true;
+		} else if (obj->data != NULL) {
+			struct tl_window *win = obj->data;
+			if (ev->object == win->frame_cb) {
+				win->frame_cb = 0;
+				if (win->ev->frame != NULL)
+					win->ev->frame(win->ud);
+			}
 		}
 		break;
 	case TL_IF_BUFFER:
@@ -444,59 +506,68 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 			uint32_t caps = tl_ev_u32(ev);
 			if (ev->bad)
 				break;
-			if ((caps & TL_SEAT_CAP_POINTER) && win->pointer == 0) {
-				win->pointer = tl_seat_get_pointer(w, win->seat, win);
-				if (win->pointer != 0 && win->cursor_shape_mgr != 0)
-					win->cursor_shape_dev = tl_cursor_shape_get_pointer(
-						w, win->cursor_shape_mgr, win->pointer, win);
+			if ((caps & TL_SEAT_CAP_POINTER) && dpy->pointer == 0) {
+				dpy->pointer = tl_seat_get_pointer(w, dpy->seat,
+					dpy);
+				if (dpy->pointer != 0 &&
+				    dpy->cursor_shape_mgr != 0)
+					dpy->cursor_shape_dev =
+						tl_cursor_shape_get_pointer(w,
+							dpy->cursor_shape_mgr,
+							dpy->pointer, dpy);
 			} else if (!(caps & TL_SEAT_CAP_POINTER) &&
-				   win->pointer != 0) {
-				if (win->cursor_shape_dev != 0) {
-					tl_cursor_shape_destroy(w, win->cursor_shape_dev);
-					win->cursor_shape_dev = 0;
+				   dpy->pointer != 0) {
+				if (dpy->cursor_shape_dev != 0) {
+					tl_cursor_shape_destroy(w,
+						dpy->cursor_shape_dev);
+					dpy->cursor_shape_dev = 0;
 				}
-				if (win->seat_version >= 3)
-					tl_pointer_release(w, win->pointer);
-				win->pointer = 0;
+				if (dpy->seat_version >= 3)
+					tl_pointer_release(w, dpy->pointer);
+				dpy->pointer = 0;
+				dpy->ptr_focus = NULL;
 			}
-			if ((caps & TL_SEAT_CAP_KEYBOARD) && win->keyboard == 0) {
-				win->keyboard = tl_seat_get_keyboard(w, win->seat, win);
+			if ((caps & TL_SEAT_CAP_KEYBOARD) && dpy->keyboard == 0) {
+				dpy->keyboard = tl_seat_get_keyboard(w,
+					dpy->seat, dpy);
 			} else if (!(caps & TL_SEAT_CAP_KEYBOARD) &&
-				   win->keyboard != 0) {
-				if (win->seat_version >= 3)
-					tl_keyboard_release(w, win->keyboard);
-				win->keyboard = 0;
+				   dpy->keyboard != 0) {
+				if (dpy->seat_version >= 3)
+					tl_keyboard_release(w, dpy->keyboard);
+				dpy->keyboard = 0;
+				dpy->kbd_focus = NULL;
 			}
 		}
 		break;
 	case TL_IF_POINTER:
-		if (ev->object == win->pointer)
-			on_pointer(win, ev);
+		if (ev->object == dpy->pointer)
+			on_pointer(dpy, ev);
 		break;
 	case TL_IF_DATA_DEVICE:
 		if (ev->opcode == TL_DATA_DEVICE_DATA_OFFER) {
 			uint32_t id = tl_ev_u32(ev);
 			if (!ev->bad && id != 0) {
-				if (win->pending_clip_offer != 0)
-					tl_data_offer_destroy(w, win->pending_clip_offer);
-				tl_wire_server_id(w, id, TL_IF_DATA_OFFER, win);
-				win->pending_clip_offer = id;
-				win->pending_clip_mime[0] = '\0';
+				if (dpy->pending_clip_offer != 0)
+					tl_data_offer_destroy(w,
+						dpy->pending_clip_offer);
+				tl_wire_server_id(w, id, TL_IF_DATA_OFFER, dpy);
+				dpy->pending_clip_offer = id;
+				dpy->pending_clip_mime[0] = '\0';
 			}
 		} else if (ev->opcode == TL_DATA_DEVICE_SELECTION) {
 			uint32_t id = tl_ev_u32(ev);
 			if (ev->bad)
 				break;
-			if (win->clip_offer != 0 && win->clip_offer != id)
-				tl_data_offer_destroy(w, win->clip_offer);
-			if (id != 0 && id == win->pending_clip_offer) {
-				win->clip_offer = id;
-				memcpy(win->clip_mime, win->pending_clip_mime,
-					sizeof(win->clip_mime));
-				win->pending_clip_offer = 0;
+			if (dpy->clip_offer != 0 && dpy->clip_offer != id)
+				tl_data_offer_destroy(w, dpy->clip_offer);
+			if (id != 0 && id == dpy->pending_clip_offer) {
+				dpy->clip_offer = id;
+				memcpy(dpy->clip_mime, dpy->pending_clip_mime,
+					sizeof(dpy->clip_mime));
+				dpy->pending_clip_offer = 0;
 			} else {
-				win->clip_offer = 0;
-				win->clip_mime[0] = '\0';
+				dpy->clip_offer = 0;
+				dpy->clip_mime[0] = '\0';
 				if (id != 0)
 					tl_data_offer_destroy(w, id);
 			}
@@ -505,8 +576,8 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 	case TL_IF_DATA_OFFER:
 		if (ev->opcode == TL_DATA_OFFER_OFFER) {
 			const char *mime = tl_ev_str(ev);
-			if (!ev->bad && ev->object == win->pending_clip_offer)
-				pick_mime(win->pending_clip_mime, mime);
+			if (!ev->bad && ev->object == dpy->pending_clip_offer)
+				pick_mime(dpy->pending_clip_mime, mime);
 		}
 		break;
 	case TL_IF_DATA_SOURCE:
@@ -514,20 +585,20 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 			(void)tl_ev_str(ev);
 			int fd = tl_ev_fd(ev);
 			if (fd >= 0) {
-				if (!ev->bad && ev->object == win->clip_source &&
-				    win->clip_text != NULL)
-					write_selection_fd(fd, win->clip_text,
-						win->clip_len);
+				if (!ev->bad && ev->object == dpy->clip_source &&
+				    dpy->clip_text != NULL)
+					write_selection_fd(fd, dpy->clip_text,
+						dpy->clip_len);
 				else
 					close(fd);
 			}
 		} else if (ev->opcode == TL_DATA_SOURCE_CANCELLED) {
-			if (ev->object == win->clip_source) {
-				tl_data_source_destroy(w, win->clip_source);
-				win->clip_source = 0;
-				free(win->clip_text);
-				win->clip_text = NULL;
-				win->clip_len = 0;
+			if (ev->object == dpy->clip_source) {
+				tl_data_source_destroy(w, dpy->clip_source);
+				dpy->clip_source = 0;
+				free(dpy->clip_text);
+				dpy->clip_text = NULL;
+				dpy->clip_len = 0;
 			}
 		}
 		break;
@@ -535,26 +606,28 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 		if (ev->opcode == TL_PRIMARY_DEVICE_DATA_OFFER) {
 			uint32_t id = tl_ev_u32(ev);
 			if (!ev->bad && id != 0) {
-				if (win->pending_prim_offer != 0)
-					tl_primary_offer_destroy(w, win->pending_prim_offer);
-				tl_wire_server_id(w, id, TL_IF_PRIMARY_OFFER, win);
-				win->pending_prim_offer = id;
-				win->pending_prim_mime[0] = '\0';
+				if (dpy->pending_prim_offer != 0)
+					tl_primary_offer_destroy(w,
+						dpy->pending_prim_offer);
+				tl_wire_server_id(w, id, TL_IF_PRIMARY_OFFER,
+					dpy);
+				dpy->pending_prim_offer = id;
+				dpy->pending_prim_mime[0] = '\0';
 			}
 		} else if (ev->opcode == TL_PRIMARY_DEVICE_SELECTION) {
 			uint32_t id = tl_ev_u32(ev);
 			if (ev->bad)
 				break;
-			if (win->prim_offer != 0 && win->prim_offer != id)
-				tl_primary_offer_destroy(w, win->prim_offer);
-			if (id != 0 && id == win->pending_prim_offer) {
-				win->prim_offer = id;
-				memcpy(win->prim_mime, win->pending_prim_mime,
-					sizeof(win->prim_mime));
-				win->pending_prim_offer = 0;
+			if (dpy->prim_offer != 0 && dpy->prim_offer != id)
+				tl_primary_offer_destroy(w, dpy->prim_offer);
+			if (id != 0 && id == dpy->pending_prim_offer) {
+				dpy->prim_offer = id;
+				memcpy(dpy->prim_mime, dpy->pending_prim_mime,
+					sizeof(dpy->prim_mime));
+				dpy->pending_prim_offer = 0;
 			} else {
-				win->prim_offer = 0;
-				win->prim_mime[0] = '\0';
+				dpy->prim_offer = 0;
+				dpy->prim_mime[0] = '\0';
 				if (id != 0)
 					tl_primary_offer_destroy(w, id);
 			}
@@ -563,8 +636,8 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 	case TL_IF_PRIMARY_OFFER:
 		if (ev->opcode == TL_PRIMARY_OFFER_OFFER) {
 			const char *mime = tl_ev_str(ev);
-			if (!ev->bad && ev->object == win->pending_prim_offer)
-				pick_mime(win->pending_prim_mime, mime);
+			if (!ev->bad && ev->object == dpy->pending_prim_offer)
+				pick_mime(dpy->pending_prim_mime, mime);
 		}
 		break;
 	case TL_IF_PRIMARY_SOURCE:
@@ -572,26 +645,26 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 			(void)tl_ev_str(ev);
 			int fd = tl_ev_fd(ev);
 			if (fd >= 0) {
-				if (!ev->bad && ev->object == win->prim_source &&
-				    win->prim_text != NULL)
-					write_selection_fd(fd, win->prim_text,
-						win->prim_len);
+				if (!ev->bad && ev->object == dpy->prim_source &&
+				    dpy->prim_text != NULL)
+					write_selection_fd(fd, dpy->prim_text,
+						dpy->prim_len);
 				else
 					close(fd);
 			}
 		} else if (ev->opcode == TL_PRIMARY_SOURCE_CANCELLED) {
-			if (ev->object == win->prim_source) {
-				tl_primary_source_destroy(w, win->prim_source);
-				win->prim_source = 0;
-				free(win->prim_text);
-				win->prim_text = NULL;
-				win->prim_len = 0;
+			if (ev->object == dpy->prim_source) {
+				tl_primary_source_destroy(w, dpy->prim_source);
+				dpy->prim_source = 0;
+				free(dpy->prim_text);
+				dpy->prim_text = NULL;
+				dpy->prim_len = 0;
 			}
 		}
 		break;
 	case TL_IF_KEYBOARD:
-		if (ev->object == win->keyboard)
-			on_keyboard(win, ev);
+		if (ev->object == dpy->keyboard)
+			on_keyboard(dpy, ev);
 		else if (ev->opcode == TL_KEYBOARD_KEYMAP) {
 			/* An old keyboard's keymap still carries an fd. */
 			(void)tl_ev_u32(ev);
@@ -601,22 +674,25 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 		}
 		break;
 	case TL_IF_TEXT_INPUT:
-		if (ev->object == win->text_input)
-			on_text_input(win, ev);
+		if (ev->object == dpy->text_input)
+			on_text_input(dpy, ev);
 		break;
 	case TL_IF_WM_BASE:
 		if (ev->opcode == TL_WM_BASE_PING) {
 			uint32_t serial = tl_ev_u32(ev);
 			if (!ev->bad)
-				tl_wm_base_pong(w, win->wm_base, serial);
+				tl_wm_base_pong(w, dpy->wm_base, serial);
 		}
 		break;
 	case TL_IF_XDG_SURFACE:
-		if (ev->opcode == TL_XDG_SURFACE_CONFIGURE) {
+		if (ev->opcode == TL_XDG_SURFACE_CONFIGURE &&
+		    obj->data != NULL) {
+			struct tl_window *win = obj->data;
 			uint32_t serial = tl_ev_u32(ev);
 			if (ev->bad)
 				break;
-			tl_xdg_surface_ack_configure(w, win->xdg_surface, serial);
+			tl_xdg_surface_ack_configure(w, win->xdg_surface,
+				serial);
 			win->configured = true;
 			if (win->ev->configure != NULL)
 				win->ev->configure(win->ud, win->pending_w,
@@ -624,7 +700,9 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 		}
 		break;
 	case TL_IF_SURFACE:
-		if (ev->opcode == TL_SURFACE_PREFERRED_BUFFER_SCALE) {
+		if (ev->opcode == TL_SURFACE_PREFERRED_BUFFER_SCALE &&
+		    obj->data != NULL) {
+			struct tl_window *win = obj->data;
 			int32_t factor = tl_ev_i32(ev);
 			if (!ev->bad && factor >= 1 && factor <= 8 &&
 			    (win->viewport == 0 || win->fractional == 0)) {
@@ -636,7 +714,9 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 		}
 		break;
 	case TL_IF_FRACTIONAL_SCALE:
-		if (ev->opcode == TL_FRACTIONAL_PREFERRED_SCALE) {
+		if (ev->opcode == TL_FRACTIONAL_PREFERRED_SCALE &&
+		    obj->data != NULL) {
+			struct tl_window *win = obj->data;
 			uint32_t scale = tl_ev_u32(ev);
 			if (!ev->bad && scale >= 120 && scale <= 120 * 8 &&
 			    win->ev->scale != NULL)
@@ -644,7 +724,10 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 		}
 		break;
 	case TL_IF_XDG_TOPLEVEL:
+		if (obj->data == NULL)
+			break;
 		if (ev->opcode == TL_TOPLEVEL_CONFIGURE) {
+			struct tl_window *win = obj->data;
 			int32_t width = tl_ev_i32(ev);
 			int32_t height = tl_ev_i32(ev);
 			size_t len;
@@ -654,6 +737,7 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 				win->pending_h = height;
 			}
 		} else if (ev->opcode == TL_TOPLEVEL_CLOSE) {
+			struct tl_window *win = obj->data;
 			if (win->ev->close != NULL)
 				win->ev->close(win->ud);
 		}
@@ -663,7 +747,7 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 		break;
 	}
 	if (ev->bad) {
-		snprintf(win->err, sizeof(win->err),
+		snprintf(dpy->err, sizeof(dpy->err),
 			"malformed message from the compositor (object %u, "
 			"opcode %u)", ev->object, ev->opcode);
 		return -1;
@@ -671,30 +755,31 @@ static int dispatch_one(struct tl_window *win, struct tl_event *ev)
 	return 0;
 }
 
-int tl_window_dispatch(struct tl_window *win)
+int tl_display_dispatch(struct tl_display *dpy)
 {
 	for (;;) {
-		long got = tl_wire_read(&win->wire);
+		long got = tl_wire_read(&dpy->wire);
 		if (got == 0) {
-			snprintf(win->err, sizeof(win->err),
+			snprintf(dpy->err, sizeof(dpy->err),
 				"the compositor closed the connection");
 			return -1;
 		}
 		if (got < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
 				break;
-			snprintf(win->err, sizeof(win->err),
-				"reading from the compositor: %s", strerror(errno));
+			snprintf(dpy->err, sizeof(dpy->err),
+				"reading from the compositor: %s",
+				strerror(errno));
 			return -1;
 		}
 		struct tl_event ev;
 		int r;
-		while ((r = tl_wire_next(&win->wire, &ev)) == 1) {
-			if (dispatch_one(win, &ev) != 0)
+		while ((r = tl_wire_next(&dpy->wire, &ev)) == 1) {
+			if (dispatch_one(dpy, &ev) != 0)
 				return -1;
 		}
-		if (r < 0 || win->wire.failed) {
-			snprintf(win->err, sizeof(win->err),
+		if (r < 0 || dpy->wire.failed) {
+			snprintf(dpy->err, sizeof(dpy->err),
 				"broken message stream from the compositor");
 			return -1;
 		}
@@ -702,40 +787,40 @@ int tl_window_dispatch(struct tl_window *win)
 	return 0;
 }
 
-int tl_window_flush(struct tl_window *win)
+int tl_display_flush(struct tl_display *dpy)
 {
-	int r = tl_wire_flush(&win->wire);
+	int r = tl_wire_flush(&dpy->wire);
 	if (r < 0)
-		snprintf(win->err, sizeof(win->err),
+		snprintf(dpy->err, sizeof(dpy->err),
 			"writing to the compositor: %s", strerror(errno));
 	return r;
 }
 
 /* Block until the server has answered everything sent so far. */
-static int roundtrip(struct tl_window *win)
+static int roundtrip(struct tl_display *dpy)
 {
-	win->synced = false;
-	win->sync_cb = tl_display_sync(&win->wire, NULL);
-	if (win->sync_cb == 0)
+	dpy->synced = false;
+	dpy->sync_cb = tl_display_sync(&dpy->wire, NULL);
+	if (dpy->sync_cb == 0)
 		return -1;
-	while (!win->synced) {
-		int f = tl_window_flush(win);
+	while (!dpy->synced) {
+		int f = tl_display_flush(dpy);
 		if (f < 0)
 			return -1;
-		struct pollfd p = { win->wire.fd, POLLIN, 0 };
+		struct pollfd p = { dpy->wire.fd, POLLIN, 0 };
 		if (f > 0)
 			p.events |= POLLOUT;
 		if (poll(&p, 1, 5000) <= 0) {
 			if (errno == EINTR)
 				continue;
-			snprintf(win->err, sizeof(win->err),
+			snprintf(dpy->err, sizeof(dpy->err),
 				"the compositor did not answer");
 			return -1;
 		}
-		if ((p.revents & POLLIN) && tl_window_dispatch(win) != 0)
+		if ((p.revents & POLLIN) && tl_display_dispatch(dpy) != 0)
 			return -1;
 		if (p.revents & (POLLERR | POLLHUP)) {
-			snprintf(win->err, sizeof(win->err),
+			snprintf(dpy->err, sizeof(dpy->err),
 				"the compositor closed the connection");
 			return -1;
 		}
@@ -743,90 +828,168 @@ static int roundtrip(struct tl_window *win)
 	return 0;
 }
 
-int tl_window_open(struct tl_window *win, const char *title,
-	const char *app_id, const struct tl_window_events *ev, void *ud)
+int tl_display_open(struct tl_display *dpy)
 {
-	memset(win, 0, sizeof(*win));
-	win->wire.fd = -1;
-	win->buffer_scale = 1;
-	win->sent_buffer_scale = 1;
-	win->ev = ev;
-	win->ud = ud;
-	if (tl_wire_connect(&win->wire, win->err, sizeof(win->err)) != 0)
+	memset(dpy, 0, sizeof(*dpy));
+	dpy->wire.fd = -1;
+	if (tl_wire_connect(&dpy->wire, dpy->err, sizeof(dpy->err)) != 0)
 		return -1;
 
-	struct tl_wire *w = &win->wire;
-	win->registry = tl_display_get_registry(w, win);
-	if (win->registry == 0 || roundtrip(win) != 0)
+	struct tl_wire *w = &dpy->wire;
+	dpy->registry = tl_display_get_registry(w, dpy);
+	if (dpy->registry == 0 || roundtrip(dpy) != 0) {
+		tl_display_close(dpy);
 		return -1;
-	if (win->compositor == 0 || win->shm == 0 || win->wm_base == 0) {
-		snprintf(win->err, sizeof(win->err),
+	}
+	if (dpy->compositor == 0 || dpy->shm == 0 || dpy->wm_base == 0) {
+		snprintf(dpy->err, sizeof(dpy->err),
 			"the compositor lacks %s",
-			win->compositor == 0 ? "wl_compositor version 4" :
-			win->shm == 0 ? "wl_shm" : "xdg_wm_base");
+			dpy->compositor == 0 ? "wl_compositor version 4" :
+			dpy->shm == 0 ? "wl_shm" : "xdg_wm_base");
+		tl_display_close(dpy);
 		return -1;
 	}
-	win->surface = tl_compositor_create_surface(w, win->compositor, win);
-	win->xdg_surface = tl_wm_base_get_xdg_surface(w, win->wm_base,
-		win->surface, win);
-	win->toplevel = tl_xdg_surface_get_toplevel(w, win->xdg_surface, win);
-	if (win->surface == 0 || win->xdg_surface == 0 || win->toplevel == 0) {
-		snprintf(win->err, sizeof(win->err), "cannot create the window");
+	if (dpy->seat != 0 && dpy->data_mgr != 0)
+		dpy->data_device = tl_data_mgr_get_device(w, dpy->data_mgr,
+			dpy->seat, dpy);
+	if (dpy->seat != 0 && dpy->primary_mgr != 0)
+		dpy->primary_device = tl_primary_mgr_get_device(w,
+			dpy->primary_mgr, dpy->seat, dpy);
+	if (dpy->seat != 0 && dpy->text_input_mgr != 0)
+		dpy->text_input = tl_text_input_mgr_get(w, dpy->text_input_mgr,
+			dpy->seat, dpy);
+	if (roundtrip(dpy) != 0) {
+		tl_display_close(dpy);
 		return -1;
 	}
-	/* Fractional scaling needs both: the compositor says the scale, and
-	 * the viewport shows our larger buffer at the window's size. */
-	if (win->viewporter != 0 && win->fractional_manager != 0) {
-		win->viewport = tl_viewporter_get_viewport(w, win->viewporter,
-			win->surface, win);
-		win->fractional = tl_fractional_get(w, win->fractional_manager,
-			win->surface, win);
+	return 0;
+}
+
+void tl_display_close(struct tl_display *dpy)
+{
+	ti_reset_pending(dpy);
+	if (dpy->text_input != 0 && dpy->wire.fd >= 0) {
+		tl_text_input_destroy(&dpy->wire, dpy->text_input);
+		dpy->text_input = 0;
 	}
-	if (win->seat != 0 && win->data_mgr != 0)
-		win->data_device = tl_data_mgr_get_device(w, win->data_mgr,
-			win->seat, win);
-	if (win->seat != 0 && win->primary_mgr != 0)
-		win->primary_device = tl_primary_mgr_get_device(w,
-			win->primary_mgr, win->seat, win);
-	if (win->seat != 0 && win->text_input_mgr != 0)
-		win->text_input = tl_text_input_mgr_get(w, win->text_input_mgr,
-			win->seat, win);
+	free(dpy->clip_text);
+	free(dpy->prim_text);
+	dpy->clip_text = dpy->prim_text = NULL;
+	if (dpy->wire.fd >= 0) {
+		(void)tl_wire_flush(&dpy->wire);
+		tl_wire_close(&dpy->wire);
+	}
+}
+
+int tl_display_fd(const struct tl_display *dpy)
+{
+	return dpy->wire.fd;
+}
+
+void tl_display_repeat_info(const struct tl_display *dpy, int32_t *rate,
+	int32_t *delay)
+{
+	if (rate != NULL)
+		*rate = dpy->repeat_rate;
+	if (delay != NULL)
+		*delay = dpy->repeat_delay;
+}
+
+int tl_window_open_on(struct tl_window *win, struct tl_display *dpy,
+	const char *title, const char *app_id,
+	const struct tl_window_events *ev, void *ud)
+{
+	memset(win, 0, sizeof(*win));
+	win->dpy = dpy;
+	win->buffer_scale = 1;
+	win->sent_buffer_scale = 1;
 	win->cursor_shape = TL_CURSOR_SHAPE_TEXT;
+	win->ev = ev;
+	win->ud = ud;
+
+	struct tl_wire *w = &dpy->wire;
+	win->surface = tl_compositor_create_surface(w, dpy->compositor, win);
+	if (win->surface == 0) {
+		snprintf(dpy->err, sizeof(dpy->err), "cannot create surface");
+		return -1;
+	}
+	win->xdg_surface = tl_wm_base_get_xdg_surface(w, dpy->wm_base,
+		win->surface, win);
+	if (win->xdg_surface == 0) {
+		tl_surface_destroy(w, win->surface);
+		win->surface = 0;
+		snprintf(dpy->err, sizeof(dpy->err), "cannot create xdg_surface");
+		return -1;
+	}
+	win->toplevel = tl_xdg_surface_get_toplevel(w, win->xdg_surface, win);
+	if (win->toplevel == 0) {
+		tl_xdg_surface_destroy(w, win->xdg_surface);
+		tl_surface_destroy(w, win->surface);
+		win->xdg_surface = win->surface = 0;
+		snprintf(dpy->err, sizeof(dpy->err), "cannot create toplevel");
+		return -1;
+	}
+	if (dpy->viewporter != 0 && dpy->fractional_manager != 0) {
+		win->viewport = tl_viewporter_get_viewport(w, dpy->viewporter,
+			win->surface, win);
+		win->fractional = tl_fractional_get(w, dpy->fractional_manager,
+			win->surface, win);
+	}
 	tl_toplevel_set_title(w, win->toplevel, title);
 	tl_toplevel_set_app_id(w, win->toplevel, app_id);
 	/* The first commit, with no buffer, asks for the first configure. */
 	tl_surface_commit(w, win->surface);
-	if (roundtrip(win) != 0)
-		return -1;
 	return 0;
 }
 
 void tl_window_close(struct tl_window *win)
 {
-	ti_reset_pending(win);
-	if (win->text_input != 0 && win->wire.fd >= 0) {
-		tl_text_input_destroy(&win->wire, win->text_input);
-		win->text_input = 0;
-	}
-	free(win->clip_text);
-	free(win->prim_text);
-	win->clip_text = win->prim_text = NULL;
-	for (int i = 0; i < 2; i++)
-		tl_buffer_free(&win->bufs[i], &win->wire);
-	if (win->wire.fd >= 0) {
-		(void)tl_wire_flush(&win->wire);
-		tl_wire_close(&win->wire);
-	}
-}
+	struct tl_display *dpy = win->dpy;
+	if (dpy == NULL)
+		return;
+	struct tl_wire *w = &dpy->wire;
 
-int tl_window_fd(const struct tl_window *win)
-{
-	return win->wire.fd;
+	if (dpy->kbd_focus == win)
+		dpy->kbd_focus = NULL;
+	if (dpy->ptr_focus == win) {
+		dpy->ptr_focus = NULL;
+		dpy->pointer_enter_serial = 0;
+	}
+	if (dpy->ti_focus == win) {
+		ti_reset_pending(dpy);
+		if (dpy->text_input != 0 && dpy->ti_enabled && w->fd >= 0) {
+			tl_text_input_disable(w, dpy->text_input);
+			tl_text_input_commit(w, dpy->text_input);
+			dpy->ti_commit_serial++;
+		}
+		dpy->ti_focus = NULL;
+		dpy->ti_enabled = false;
+	}
+	for (int i = 0; i < 2; i++)
+		tl_buffer_free(&win->bufs[i], w);
+	if (win->frame_cb != 0) {
+		tl_wire_zombie(w, win->frame_cb);
+		win->frame_cb = 0;
+	}
+	if (w->fd >= 0) {
+		if (win->fractional != 0)
+			tl_fractional_destroy(w, win->fractional);
+		if (win->viewport != 0)
+			tl_viewport_destroy(w, win->viewport);
+		if (win->toplevel != 0)
+			tl_toplevel_destroy(w, win->toplevel);
+		if (win->xdg_surface != 0)
+			tl_xdg_surface_destroy(w, win->xdg_surface);
+		if (win->surface != 0)
+			tl_surface_destroy(w, win->surface);
+	}
+	memset(win, 0, sizeof(*win));
 }
 
 struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
 	int height)
 {
+	struct tl_display *dpy = win->dpy;
 	/* A free buffer of the right size first. */
 	for (int i = 0; i < 2; i++) {
 		struct tl_buffer *b = &win->bufs[i];
@@ -839,8 +1002,8 @@ struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
 		struct tl_buffer *b = &win->bufs[i];
 		if (b->id == 0 || !b->busy || b->width != width ||
 		    b->height != height) {
-			tl_buffer_free(b, &win->wire);
-			if (tl_buffer_create(b, &win->wire, win->shm, width,
+			tl_buffer_free(b, &dpy->wire);
+			if (tl_buffer_create(b, &dpy->wire, dpy->shm, width,
 				    height) != 0)
 				return NULL;
 			return b;
@@ -852,13 +1015,13 @@ struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
 bool tl_window_can_scale(const struct tl_window *win)
 {
 	return (win->viewport != 0 && win->fractional != 0) ||
-		win->compositor_version >= 6;
+		(win->dpy != NULL && win->dpy->compositor_version >= 6);
 }
 
 void tl_window_present_damage(struct tl_window *win, struct tl_buffer *b,
 	int width, int height, const struct tl_rect *rects, size_t nrects)
 {
-	struct tl_wire *w = &win->wire;
+	struct tl_wire *w = &win->dpy->wire;
 	if (win->viewport != 0) {
 		if (width != win->dest_w || height != win->dest_h) {
 			tl_viewport_set_destination(w, win->viewport, width,
@@ -872,7 +1035,8 @@ void tl_window_present_damage(struct tl_window *win, struct tl_buffer *b,
 	}
 	tl_surface_attach(w, win->surface, b->id);
 	if (nrects == 0) {
-		tl_surface_damage_buffer(w, win->surface, 0, 0, b->width, b->height);
+		tl_surface_damage_buffer(w, win->surface, 0, 0, b->width,
+			b->height);
 	} else {
 		for (size_t i = 0; i < nrects; i++)
 			tl_surface_damage_buffer(w, win->surface, rects[i].x,
@@ -897,9 +1061,9 @@ bool tl_window_frame_pending(const struct tl_window *win)
 
 void tl_window_set_title(struct tl_window *win, const char *title)
 {
-	if (win->toplevel == 0 || title == NULL)
+	if (win->dpy == NULL || win->toplevel == 0 || title == NULL)
 		return;
-	tl_toplevel_set_title(&win->wire, win->toplevel, title);
+	tl_toplevel_set_title(&win->dpy->wire, win->toplevel, title);
 }
 
 void tl_window_set_cursor(struct tl_window *win, uint32_t shape)
@@ -907,66 +1071,75 @@ void tl_window_set_cursor(struct tl_window *win, uint32_t shape)
 	if (win->cursor_shape == shape)
 		return;
 	win->cursor_shape = shape;
-	if (win->cursor_shape_dev != 0 && win->pointer_enter_serial != 0)
-		tl_cursor_shape_set(&win->wire, win->cursor_shape_dev,
-			win->pointer_enter_serial, shape);
+	struct tl_display *dpy = win->dpy;
+	if (dpy != NULL && dpy->ptr_focus == win &&
+	    dpy->cursor_shape_dev != 0 && dpy->pointer_enter_serial != 0)
+		tl_cursor_shape_set(&dpy->wire, dpy->cursor_shape_dev,
+			dpy->pointer_enter_serial, shape);
 }
 
 void tl_window_set_clipboard(struct tl_window *win, const char *text,
 	size_t len)
 {
-	if (win->data_mgr == 0 || win->data_device == 0 || text == NULL)
+	struct tl_display *dpy = win->dpy;
+	if (dpy == NULL || dpy->data_mgr == 0 || dpy->data_device == 0 ||
+	    text == NULL)
 		return;
-	if (win->clip_source != 0) {
-		tl_data_source_destroy(&win->wire, win->clip_source);
-		win->clip_source = 0;
+	if (dpy->clip_source != 0) {
+		tl_data_source_destroy(&dpy->wire, dpy->clip_source);
+		dpy->clip_source = 0;
 	}
-	free(win->clip_text);
-	win->clip_text = dup_text(text, len);
-	if (win->clip_text == NULL)
+	free(dpy->clip_text);
+	dpy->clip_text = dup_text(text, len);
+	if (dpy->clip_text == NULL)
 		return;
-	win->clip_len = len;
-	win->clip_source = tl_data_mgr_create_source(&win->wire, win->data_mgr,
-		win);
-	if (win->clip_source == 0)
+	dpy->clip_len = len;
+	dpy->clip_source = tl_data_mgr_create_source(&dpy->wire, dpy->data_mgr,
+		dpy);
+	if (dpy->clip_source == 0)
 		return;
-	tl_data_source_offer(&win->wire, win->clip_source,
+	tl_data_source_offer(&dpy->wire, dpy->clip_source,
 		"text/plain;charset=utf-8");
-	tl_data_source_offer(&win->wire, win->clip_source, "text/plain");
-	tl_data_source_offer(&win->wire, win->clip_source, "UTF8_STRING");
-	tl_data_device_set_selection(&win->wire, win->data_device,
-		win->clip_source, win->last_serial);
+	tl_data_source_offer(&dpy->wire, dpy->clip_source, "text/plain");
+	tl_data_source_offer(&dpy->wire, dpy->clip_source, "UTF8_STRING");
+	tl_data_device_set_selection(&dpy->wire, dpy->data_device,
+		dpy->clip_source, dpy->last_serial);
 }
 
 void tl_window_set_primary(struct tl_window *win, const char *text, size_t len)
 {
-	if (win->primary_mgr == 0 || win->primary_device == 0 || text == NULL)
+	struct tl_display *dpy = win->dpy;
+	if (dpy == NULL || dpy->primary_mgr == 0 || dpy->primary_device == 0 ||
+	    text == NULL)
 		return;
-	if (win->prim_source != 0) {
-		tl_primary_source_destroy(&win->wire, win->prim_source);
-		win->prim_source = 0;
+	if (dpy->prim_source != 0) {
+		tl_primary_source_destroy(&dpy->wire, dpy->prim_source);
+		dpy->prim_source = 0;
 	}
-	free(win->prim_text);
-	win->prim_text = dup_text(text, len);
-	if (win->prim_text == NULL)
+	free(dpy->prim_text);
+	dpy->prim_text = dup_text(text, len);
+	if (dpy->prim_text == NULL)
 		return;
-	win->prim_len = len;
-	win->prim_source = tl_primary_mgr_create_source(&win->wire,
-		win->primary_mgr, win);
-	if (win->prim_source == 0)
+	dpy->prim_len = len;
+	dpy->prim_source = tl_primary_mgr_create_source(&dpy->wire,
+		dpy->primary_mgr, dpy);
+	if (dpy->prim_source == 0)
 		return;
-	tl_primary_source_offer(&win->wire, win->prim_source,
+	tl_primary_source_offer(&dpy->wire, dpy->prim_source,
 		"text/plain;charset=utf-8");
-	tl_primary_source_offer(&win->wire, win->prim_source, "text/plain");
-	tl_primary_source_offer(&win->wire, win->prim_source, "UTF8_STRING");
-	tl_primary_device_set_selection(&win->wire, win->primary_device,
-		win->prim_source, win->last_serial);
+	tl_primary_source_offer(&dpy->wire, dpy->prim_source, "text/plain");
+	tl_primary_source_offer(&dpy->wire, dpy->prim_source, "UTF8_STRING");
+	tl_primary_device_set_selection(&dpy->wire, dpy->primary_device,
+		dpy->prim_source, dpy->last_serial);
 }
 
 int tl_window_paste(struct tl_window *win, bool primary)
 {
-	uint32_t offer = primary ? win->prim_offer : win->clip_offer;
-	const char *mime = primary ? win->prim_mime : win->clip_mime;
+	struct tl_display *dpy = win->dpy;
+	if (dpy == NULL)
+		return -1;
+	uint32_t offer = primary ? dpy->prim_offer : dpy->clip_offer;
+	const char *mime = primary ? dpy->prim_mime : dpy->clip_mime;
 	if (offer == 0 || mime[0] == '\0')
 		return -1;
 	int p[2];
@@ -975,9 +1148,9 @@ int tl_window_paste(struct tl_window *win, bool primary)
 	fcntl(p[0], F_SETFD, FD_CLOEXEC);
 	fcntl(p[0], F_SETFL, O_NONBLOCK);
 	if (primary)
-		tl_primary_offer_receive(&win->wire, offer, mime, p[1]);
+		tl_primary_offer_receive(&dpy->wire, offer, mime, p[1]);
 	else
-		tl_data_offer_receive(&win->wire, offer, mime, p[1]);
+		tl_data_offer_receive(&dpy->wire, offer, mime, p[1]);
 	close(p[1]);
 	return p[0];
 }
@@ -985,6 +1158,9 @@ int tl_window_paste(struct tl_window *win, bool primary)
 void tl_window_set_cursor_rect(struct tl_window *win, int32_t x, int32_t y,
 	int32_t width, int32_t height)
 {
+	struct tl_display *dpy = win->dpy;
+	if (dpy == NULL)
+		return;
 	if (width < 0)
 		width = 0;
 	if (height < 0)
@@ -999,16 +1175,16 @@ void tl_window_set_cursor_rect(struct tl_window *win, int32_t x, int32_t y,
 	win->ti_rect_h = height;
 	win->ti_rect_valid = true;
 	win->ti_rect_sent = false;
-	if (win->text_input != 0 && win->ti_focused && win->ti_enabled) {
-		tl_text_input_set_cursor_rectangle(&win->wire, win->text_input,
+	if (dpy->text_input != 0 && dpy->ti_focus == win && dpy->ti_enabled) {
+		tl_text_input_set_cursor_rectangle(&dpy->wire, dpy->text_input,
 			x, y, width, height);
-		tl_text_input_commit(&win->wire, win->text_input);
-		win->ti_commit_serial++;
+		tl_text_input_commit(&dpy->wire, dpy->text_input);
+		dpy->ti_commit_serial++;
 		win->ti_rect_sent = true;
 	}
 }
 
 bool tl_window_has_text_input(const struct tl_window *win)
 {
-	return win->text_input != 0;
+	return win->dpy != NULL && win->dpy->text_input != 0;
 }

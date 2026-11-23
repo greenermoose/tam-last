@@ -89,4 +89,39 @@ const struct tl_glyph *tl_font_glyph_styled(struct tl_font *f, uint32_t cp,
 const struct tl_glyph *tl_font_glyph(struct tl_font *f, uint32_t cp,
 	int span);
 
+/* Shared font cache for multi-window server mode: keyed by font paths,
+ * point size (in tenths of a point), and dpi. Keeps up to TL_FONT_CACHE_WARM
+ * unreferenced entries warm so reopening a window stays instant. */
+#define TL_FONT_CACHE_WARM 8
+
+struct tl_font_key {
+	char path[512];
+	char bold[512];
+	char italic[512];
+	char bold_italic[512];
+	char fallback[512];
+	int pt_tenths;
+	int dpi;
+};
+
+struct tl_font_cache_entry {
+	struct tl_font_key key;
+	struct tl_font font;
+	int refcount;
+	uint64_t last_used;
+};
+
+struct tl_font_cache {
+	struct tl_font_cache_entry **entries;
+	size_t len;
+	size_t cap;
+	uint64_t clock;
+};
+
+void tl_font_cache_init(struct tl_font_cache *c);
+struct tl_font *tl_font_cache_acquire(struct tl_font_cache *c,
+	const struct tl_font_key *key, char *err, size_t errlen);
+void tl_font_cache_release(struct tl_font_cache *c, struct tl_font *f);
+void tl_font_cache_free(struct tl_font_cache *c);
+
 #endif

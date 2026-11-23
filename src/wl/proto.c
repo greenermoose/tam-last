@@ -361,6 +361,12 @@ uint32_t tl_wm_base_get_xdg_surface(struct tl_wire *w, uint32_t wm_base,
 	return send_new(w, wm_base, 2, &m, id);
 }
 
+void tl_xdg_surface_destroy(struct tl_wire *w, uint32_t xdg_surface)
+{
+	send0(w, xdg_surface, 0);
+	tl_wire_zombie(w, xdg_surface);
+}
+
 uint32_t tl_xdg_surface_get_toplevel(struct tl_wire *w, uint32_t xdg_surface,
 	void *data)
 {
@@ -378,6 +384,12 @@ void tl_xdg_surface_ack_configure(struct tl_wire *w, uint32_t xdg_surface,
 	tl_msg_init(&m);
 	tl_msg_u32(&m, serial);
 	(void)tl_wire_send(w, xdg_surface, 4, &m);
+}
+
+void tl_toplevel_destroy(struct tl_wire *w, uint32_t toplevel)
+{
+	send0(w, toplevel, 0);
+	tl_wire_zombie(w, toplevel);
 }
 
 void tl_toplevel_set_title(struct tl_wire *w, uint32_t toplevel,
@@ -409,6 +421,12 @@ uint32_t tl_viewporter_get_viewport(struct tl_wire *w, uint32_t viewporter,
 	return send_new(w, viewporter, 1, &m, id);
 }
 
+void tl_viewport_destroy(struct tl_wire *w, uint32_t viewport)
+{
+	send0(w, viewport, 0);
+	tl_wire_zombie(w, viewport);
+}
+
 void tl_viewport_set_destination(struct tl_wire *w, uint32_t viewport,
 	int32_t width, int32_t height)
 {
@@ -428,6 +446,12 @@ uint32_t tl_fractional_get(struct tl_wire *w, uint32_t manager,
 	tl_msg_u32(&m, id);
 	tl_msg_u32(&m, surface);
 	return send_new(w, manager, 1, &m, id);
+}
+
+void tl_fractional_destroy(struct tl_wire *w, uint32_t fractional)
+{
+	send0(w, fractional, 0);
+	tl_wire_zombie(w, fractional);
 }
 
 uint32_t tl_text_input_mgr_get(struct tl_wire *w, uint32_t mgr,

@@ -115,33 +115,38 @@ static void test_text_input_lifecycle(void)
 	cbs.ime_preedit = ti_on_preedit;
 	cbs.ime_commit = ti_on_commit;
 
+	struct tl_display dpy;
+	memset(&dpy, 0, sizeof(dpy));
+	tl_wire_init(&dpy.wire, sv[0]);
+	dpy.text_input = tl_wire_new_id(&dpy.wire, TL_IF_TEXT_INPUT, &dpy);
+
 	struct tl_window win;
 	memset(&win, 0, sizeof(win));
-	tl_wire_init(&win.wire, sv[0]);
+	win.dpy = &dpy;
 	win.ev = &cbs;
 	win.ud = &rec;
-	win.surface = tl_wire_new_id(&win.wire, TL_IF_SURFACE, &win);
-	win.text_input = tl_wire_new_id(&win.wire, TL_IF_TEXT_INPUT, &win);
+	win.surface = tl_wire_new_id(&dpy.wire, TL_IF_SURFACE, &win);
 	CHECK(tl_window_has_text_input(&win));
 
 	/* Server sends enter(surface). */
 	struct tl_msg m;
 	tl_msg_init(&m);
 	tl_msg_u32(&m, win.surface);
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_ENTER, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_ENTER, &m) == 0);
 	CHECK(tl_wire_flush(&srv) == 0);
-	CHECK(tl_window_dispatch(&win) == 0);
-	CHECK(win.ti_focused && win.ti_enabled && win.ti_commit_serial == 1);
+	CHECK(tl_display_dispatch(&dpy) == 0);
+	CHECK(dpy.ti_focus == &win && dpy.ti_enabled &&
+		dpy.ti_commit_serial == 1);
 
 	/* Client must have sent enable, set_content_type(NONE, TERMINAL), commit. */
-	CHECK(tl_window_flush(&win) == 0);
+	CHECK(tl_display_flush(&dpy) == 0);
 	CHECK(tl_wire_read(&srv) > 0);
 	struct tl_event ev;
-	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == win.text_input && ev.opcode == 1); /* enable */
-	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == win.text_input && ev.opcode == 5); /* set_content_type */
+	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == dpy.text_input && ev.opcode == 1); /* enable */
+	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == dpy.text_input && ev.opcode == 5); /* set_content_type */
 	CHECK(tl_ev_u32(&ev) == TL_TEXT_INPUT_HINT_NONE);
 	CHECK(tl_ev_u32(&ev) == TL_TEXT_INPUT_PURPOSE_TERMINAL);
-	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == win.text_input && ev.opcode == 7); /* commit */
+	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == dpy.text_input && ev.opcode == 7); /* commit */
 	CHECK(tl_wire_next(&srv, &ev) == 0);
 
 	/* Server sends preedit_string("nihao", 0, 5) + done(1). */
@@ -149,12 +154,12 @@ static void test_text_input_lifecycle(void)
 	tl_msg_str(&m, "nihao");
 	tl_msg_i32(&m, 0);
 	tl_msg_i32(&m, 5);
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_PREEDIT_STRING, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_PREEDIT_STRING, &m) == 0);
 	tl_msg_init(&m);
 	tl_msg_u32(&m, 1);
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_DONE, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_DONE, &m) == 0);
 	CHECK(tl_wire_flush(&srv) == 0);
-	CHECK(tl_window_dispatch(&win) == 0);
+	CHECK(tl_display_dispatch(&dpy) == 0);
 	CHECK(rec.preedit_calls == 1 && strcmp(rec.preedit, "nihao") == 0);
 	CHECK(rec.cbeg == 0 && rec.cend == 5);
 	CHECK(rec.commit_calls == 0);
@@ -164,15 +169,15 @@ static void test_text_input_lifecycle(void)
 	tl_msg_init(&m);
 	tl_msg_u32(&m, 0);
 	tl_msg_u32(&m, 0);
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_DELETE_SURROUNDING_TEXT, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_DELETE_SURROUNDING_TEXT, &m) == 0);
 	tl_msg_init(&m);
 	tl_msg_str(&m, "\xe4\xbd\xa0\xe5\xa5\xbd");
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_COMMIT_STRING, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_COMMIT_STRING, &m) == 0);
 	tl_msg_init(&m);
 	tl_msg_u32(&m, 1);
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_DONE, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_DONE, &m) == 0);
 	CHECK(tl_wire_flush(&srv) == 0);
-	CHECK(tl_window_dispatch(&win) == 0);
+	CHECK(tl_display_dispatch(&dpy) == 0);
 	CHECK(rec.commit_calls == 1 && strcmp(rec.commit, "\xe4\xbd\xa0\xe5\xa5\xbd") == 0);
 	CHECK(rec.preedit_calls == 2 && rec.preedit[0] == '\0');
 	CHECK(rec.order_n == 3 && rec.order[1] == 1 && rec.order[2] == 2);
@@ -180,13 +185,13 @@ static void test_text_input_lifecycle(void)
 	/* Cursor rectangle is sent once and deduplicated when unchanged. */
 	tl_window_set_cursor_rect(&win, 12, 34, 8, 16);
 	tl_window_set_cursor_rect(&win, 12, 34, 8, 16);
-	CHECK(win.ti_commit_serial == 2);
-	CHECK(tl_window_flush(&win) == 0);
+	CHECK(dpy.ti_commit_serial == 2);
+	CHECK(tl_display_flush(&dpy) == 0);
 	CHECK(tl_wire_read(&srv) > 0);
-	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == win.text_input && ev.opcode == 6); /* set_cursor_rectangle */
+	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == dpy.text_input && ev.opcode == 6); /* set_cursor_rectangle */
 	CHECK(tl_ev_i32(&ev) == 12 && tl_ev_i32(&ev) == 34 &&
 		tl_ev_i32(&ev) == 8 && tl_ev_i32(&ev) == 16);
-	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == win.text_input && ev.opcode == 7); /* commit */
+	CHECK(tl_wire_next(&srv, &ev) == 1 && ev.object == dpy.text_input && ev.opcode == 7); /* commit */
 	CHECK(tl_wire_next(&srv, &ev) == 0);
 
 	/* Preedit set, then leave(surface) clears preedit and stops sending requests. */
@@ -194,22 +199,140 @@ static void test_text_input_lifecycle(void)
 	tl_msg_str(&m, "abc");
 	tl_msg_i32(&m, 3);
 	tl_msg_i32(&m, 3);
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_PREEDIT_STRING, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_PREEDIT_STRING, &m) == 0);
 	tl_msg_init(&m);
 	tl_msg_u32(&m, 2);
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_DONE, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_DONE, &m) == 0);
 	tl_msg_init(&m);
 	tl_msg_u32(&m, win.surface);
-	CHECK(tl_wire_send(&srv, win.text_input, TL_TEXT_INPUT_LEAVE, &m) == 0);
+	CHECK(tl_wire_send(&srv, dpy.text_input, TL_TEXT_INPUT_LEAVE, &m) == 0);
 	CHECK(tl_wire_flush(&srv) == 0);
-	CHECK(tl_window_dispatch(&win) == 0);
-	CHECK(!win.ti_focused && !win.ti_enabled);
+	CHECK(tl_display_dispatch(&dpy) == 0);
+	CHECK(dpy.ti_focus == NULL && !dpy.ti_enabled);
 	CHECK(rec.preedit_calls == 4 && rec.preedit[0] == '\0');
 	/* Cursor rect update while unfocused does not send wire traffic. */
 	tl_window_set_cursor_rect(&win, 20, 40, 8, 16);
-	CHECK(win.ti_commit_serial == 2);
+	CHECK(dpy.ti_commit_serial == 2);
 
 	tl_window_close(&win);
+	tl_display_close(&dpy);
+	tl_wire_close(&srv);
+}
+
+struct mw_rec {
+	int focus_in;
+	int focus_out;
+	uint32_t last_key;
+	int keys;
+	int closes;
+};
+
+static void mw_focus_in(void *ud, const uint32_t *codes, size_t n)
+{
+	(void)codes;
+	(void)n;
+	((struct mw_rec *)ud)->focus_in++;
+}
+
+static void mw_focus_out(void *ud)
+{
+	((struct mw_rec *)ud)->focus_out++;
+}
+
+static void mw_key(void *ud, uint32_t code, bool pressed)
+{
+	struct mw_rec *r = ud;
+	if (pressed) {
+		r->last_key = code;
+		r->keys++;
+	}
+}
+
+static void mw_close(void *ud)
+{
+	((struct mw_rec *)ud)->closes++;
+}
+
+static void test_multi_window_routing(void)
+{
+	int sv[2];
+	CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+	fcntl(sv[0], F_SETFL, O_NONBLOCK);
+	fcntl(sv[1], F_SETFL, O_NONBLOCK);
+
+	struct tl_wire srv;
+	tl_wire_init(&srv, sv[1]);
+
+	struct tl_display dpy;
+	memset(&dpy, 0, sizeof(dpy));
+	tl_wire_init(&dpy.wire, sv[0]);
+	dpy.keyboard = tl_wire_new_id(&dpy.wire, TL_IF_KEYBOARD, &dpy);
+
+	struct tl_window_events cbs;
+	memset(&cbs, 0, sizeof(cbs));
+	cbs.focus_in = mw_focus_in;
+	cbs.focus_out = mw_focus_out;
+	cbs.key = mw_key;
+	cbs.close = mw_close;
+
+	struct mw_rec r1 = { 0 }, r2 = { 0 };
+	struct tl_window w1, w2;
+	memset(&w1, 0, sizeof(w1));
+	memset(&w2, 0, sizeof(w2));
+	w1.dpy = w2.dpy = &dpy;
+	w1.ev = w2.ev = &cbs;
+	w1.ud = &r1;
+	w2.ud = &r2;
+	w1.surface = tl_wire_new_id(&dpy.wire, TL_IF_SURFACE, &w1);
+	w1.toplevel = tl_wire_new_id(&dpy.wire, TL_IF_XDG_TOPLEVEL, &w1);
+	w2.surface = tl_wire_new_id(&dpy.wire, TL_IF_SURFACE, &w2);
+	w2.toplevel = tl_wire_new_id(&dpy.wire, TL_IF_XDG_TOPLEVEL, &w2);
+
+	/* Keyboard enters w1, receives key 30; then switches to w2, receives key 31. */
+	struct tl_msg m;
+	tl_msg_init(&m);
+	tl_msg_u32(&m, 1);
+	tl_msg_u32(&m, w1.surface);
+	tl_msg_u32(&m, 0); /* empty keys array */
+	CHECK(tl_wire_send(&srv, dpy.keyboard, TL_KEYBOARD_ENTER, &m) == 0);
+
+	tl_msg_init(&m);
+	tl_msg_u32(&m, 2);
+	tl_msg_u32(&m, 100);
+	tl_msg_u32(&m, 30);
+	tl_msg_u32(&m, 1);
+	CHECK(tl_wire_send(&srv, dpy.keyboard, TL_KEYBOARD_KEY, &m) == 0);
+
+	tl_msg_init(&m);
+	tl_msg_u32(&m, 3);
+	tl_msg_u32(&m, w2.surface);
+	tl_msg_u32(&m, 0);
+	CHECK(tl_wire_send(&srv, dpy.keyboard, TL_KEYBOARD_ENTER, &m) == 0);
+
+	tl_msg_init(&m);
+	tl_msg_u32(&m, 4);
+	tl_msg_u32(&m, 101);
+	tl_msg_u32(&m, 31);
+	tl_msg_u32(&m, 1);
+	CHECK(tl_wire_send(&srv, dpy.keyboard, TL_KEYBOARD_KEY, &m) == 0);
+
+	CHECK(tl_wire_flush(&srv) == 0);
+	CHECK(tl_display_dispatch(&dpy) == 0);
+	CHECK(r1.focus_in == 1 && r1.focus_out == 1 && r1.keys == 1 && r1.last_key == 30);
+	CHECK(r2.focus_in == 1 && r2.focus_out == 0 && r2.keys == 1 && r2.last_key == 31);
+
+	/* Closing w1 leaves w2 intact and receiving toplevel.close. */
+	tl_window_close(&w1);
+	CHECK(dpy.kbd_focus == &w2);
+	tl_msg_init(&m);
+	CHECK(tl_wire_send(&srv, w2.toplevel, TL_TOPLEVEL_CLOSE, &m) == 0);
+	CHECK(tl_wire_flush(&srv) == 0);
+	CHECK(tl_display_dispatch(&dpy) == 0);
+	CHECK(r1.closes == 0 && r2.closes == 1);
+
+	tl_window_close(&w2);
+	CHECK(dpy.kbd_focus == NULL);
+	tl_display_close(&dpy);
 	tl_wire_close(&srv);
 }
 
@@ -341,11 +464,15 @@ int main(void)
 	REQ(xdg, "xdg_wm_base", "get_xdg_surface", tl_wm_base_get_xdg_surface(&client, 3, 4, NULL));
 	REQ(xdg, "xdg_surface", "get_toplevel", tl_xdg_surface_get_toplevel(&client, 9, NULL));
 	REQ(xdg, "xdg_surface", "ack_configure", tl_xdg_surface_ack_configure(&client, 9, 1));
+	REQ(xdg, "xdg_surface", "destroy", tl_xdg_surface_destroy(&client, 9));
 	REQ(xdg, "xdg_toplevel", "set_title", tl_toplevel_set_title(&client, 10, "t"));
 	REQ(xdg, "xdg_toplevel", "set_app_id", tl_toplevel_set_app_id(&client, 10, "a"));
+	REQ(xdg, "xdg_toplevel", "destroy", tl_toplevel_destroy(&client, 10));
 	REQ(vp, "wp_viewporter", "get_viewport", tl_viewporter_get_viewport(&client, 11, 4, NULL));
 	REQ(vp, "wp_viewport", "set_destination", tl_viewport_set_destination(&client, 12, 640, 480));
+	REQ(vp, "wp_viewport", "destroy", tl_viewport_destroy(&client, 12));
 	REQ(fs, "wp_fractional_scale_manager_v1", "get_fractional_scale", tl_fractional_get(&client, 13, 4, NULL));
+	REQ(fs, "wp_fractional_scale_v1", "destroy", tl_fractional_destroy(&client, 13));
 	REQ(ti, "zwp_text_input_manager_v3", "get_text_input", tl_text_input_mgr_get(&client, 24, 3, NULL));
 	REQ(ti, "zwp_text_input_v3", "enable", tl_text_input_enable(&client, 25));
 	REQ(ti, "zwp_text_input_v3", "disable", tl_text_input_disable(&client, 25));
@@ -409,5 +536,6 @@ int main(void)
 	tl_wire_close(&server);
 
 	test_text_input_lifecycle();
+	test_multi_window_routing();
 	CHECK_DONE("test_wire");
 }

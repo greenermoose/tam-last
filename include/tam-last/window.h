@@ -1,6 +1,5 @@
-/* One xdg-shell toplevel window and the seat's keyboard, on our own
- * Wayland wire code. The window reports what happens through callbacks
- * and never decides anything about the terminal. */
+/* Shared Wayland display connection (globals, seat, clipboard, IME) and
+ * per-window xdg-shell toplevels on our own Wayland wire code. */
 #ifndef TL_WINDOW_H
 #define TL_WINDOW_H
 
@@ -10,6 +9,8 @@
 
 #include "tam-last/shm.h"
 #include "tam-last/wire.h"
+
+struct tl_window;
 
 struct tl_window_events {
 	/* Draw and present a width x height frame. 0 means "you choose". */
@@ -41,29 +42,32 @@ struct tl_window_events {
 	void (*ime_commit)(void *ud, const char *text, size_t len);
 };
 
-struct tl_window {
+/* One Wayland connection shared by 0..N windows in the process. */
+struct tl_display {
 	struct tl_wire wire;
 	uint32_t registry, compositor, shm, seat, wm_base;
-	uint32_t viewporter, fractional_manager, viewport, fractional;
+	uint32_t viewporter, fractional_manager;
 	uint32_t cursor_shape_mgr, cursor_shape_dev;
 	uint32_t data_mgr, data_device;
 	uint32_t primary_mgr, primary_device;
 	uint32_t text_input_mgr, text_input;
-	int dest_w, dest_h; /* the viewport destination last set */
 	uint32_t compositor_version;
-	int32_t buffer_scale;
-	int32_t sent_buffer_scale;
-	uint32_t surface, xdg_surface, toplevel, keyboard, pointer;
-	uint32_t frame_cb, sync_cb;
 	uint32_t seat_version;
+	uint32_t keyboard, pointer;
+	uint32_t sync_cb;
+	bool synced;
 	uint32_t last_serial;
 	uint32_t pointer_enter_serial;
-	uint32_t cursor_shape;
+	int32_t repeat_rate, repeat_delay;
+	/* Currently focused windows for seat devices. */
+	struct tl_window *kbd_focus;
+	struct tl_window *ptr_focus;
+	struct tl_window *ti_focus;
 	/* Pending pointer axis frame accumulator. */
 	bool axis_pending[2];
 	double axis_val[2];
 	int32_t axis_v120[2];
-	/* Clipboard and primary selection state. */
+	/* Seat-wide clipboard and primary selection state. */
 	uint32_t pending_clip_offer, clip_offer, clip_source;
 	char pending_clip_mime[64], clip_mime[64];
 	char *clip_text;
@@ -72,8 +76,7 @@ struct tl_window {
 	char pending_prim_mime[64], prim_mime[64];
 	char *prim_text;
 	size_t prim_len;
-	/* Input method (text-input-v3) double-buffered state. */
-	bool ti_focused;
+	/* Input method (text-input-v3) double-buffered state on the seat. */
 	bool ti_enabled;
 	uint32_t ti_commit_serial;
 	char *ti_pending_preedit;
@@ -81,46 +84,62 @@ struct tl_window {
 	bool ti_has_pending_preedit;
 	char *ti_pending_commit;
 	bool ti_has_pending_commit;
+	char err[200];
+};
+
+/* One xdg-shell toplevel window attached to a tl_display. */
+struct tl_window {
+	struct tl_display *dpy;
+	uint32_t surface, xdg_surface, toplevel;
+	uint32_t viewport, fractional;
+	uint32_t frame_cb;
+	int dest_w, dest_h; /* the viewport destination last set */
+	int32_t buffer_scale;
+	int32_t sent_buffer_scale;
+	uint32_t cursor_shape;
 	int32_t ti_rect_x, ti_rect_y, ti_rect_w, ti_rect_h;
 	bool ti_rect_valid;
 	bool ti_rect_sent;
-	bool synced;
 	bool configured;
 	int pending_w, pending_h;
 	struct tl_buffer bufs[2];
 	const struct tl_window_events *ev;
 	void *ud;
-	char err[200];
 };
 
-/* Connect, find the globals, and map an empty toplevel. Returns 0, or -1
- * with a message in win->err. */
-int tl_window_open(struct tl_window *win, const char *title,
-	const char *app_id, const struct tl_window_events *ev, void *ud);
-void tl_window_close(struct tl_window *win);
-int tl_window_fd(const struct tl_window *win);
-
-/* Read and handle everything the socket has. Returns 0, or -1 when the
- * connection failed (message in win->err). */
-int tl_window_dispatch(struct tl_window *win);
-/* Write queued requests: 0 done, 1 socket full, -1 error. */
-int tl_window_flush(struct tl_window *win);
-
-/* A free buffer of this size, or NULL when both are still busy. */
-struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
-	int height);
 struct tl_rect {
 	int x, y, w, h;
 };
 
-/* Attach, damage all, ask for a frame callback, commit. With fractional
- * scaling, the buffer is in device pixels and is shown at the window's
- * size in logical pixels, width x height; otherwise those are ignored. */
+/* Connect to Wayland, bind globals, and create seat devices. Returns 0, or
+ * -1 with a message in dpy->err. */
+int tl_display_open(struct tl_display *dpy);
+void tl_display_close(struct tl_display *dpy);
+int tl_display_fd(const struct tl_display *dpy);
+/* Read and handle everything the socket has. Returns 0, or -1 on error. */
+int tl_display_dispatch(struct tl_display *dpy);
+/* Write queued requests: 0 done, 1 socket full, -1 error. */
+int tl_display_flush(struct tl_display *dpy);
+void tl_display_repeat_info(const struct tl_display *dpy, int32_t *rate,
+	int32_t *delay);
+
+/* Map a new toplevel window on an already-open tl_display (non-blocking:
+ * the compositor's configure arrives asynchronously via tl_display_dispatch). */
+int tl_window_open_on(struct tl_window *win, struct tl_display *dpy,
+	const char *title, const char *app_id,
+	const struct tl_window_events *ev, void *ud);
+/* Destroy this window's Wayland objects and buffers on its shared display. */
+void tl_window_close(struct tl_window *win);
+
+/* A free buffer of this size, or NULL when both are still busy. */
+struct tl_buffer *tl_window_buffer(struct tl_window *win, int width,
+	int height);
+
+/* Attach, damage, ask for a frame callback, commit. */
 void tl_window_present(struct tl_window *win, struct tl_buffer *b,
 	int width, int height);
 void tl_window_present_damage(struct tl_window *win, struct tl_buffer *b,
 	int width, int height, const struct tl_rect *rects, size_t nrects);
-/* True when the window can draw at a fractional scale. */
 bool tl_window_can_scale(const struct tl_window *win);
 bool tl_window_frame_pending(const struct tl_window *win);
 

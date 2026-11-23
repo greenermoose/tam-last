@@ -35,9 +35,10 @@ while :; do
 	printf '  \033[1;32ma\033[0m  OSC Suite (0.2.0)   titles, OSC 7/8/52 policy, color queries & swaps\n'
 	printf '  \033[1;32mb\033[0m  Queries & Sync (0.2.1) DA2, XTVERSION, DECRQM, DEC 2026, terminfo\n'
 	printf '  \033[1;32mc\033[0m  Daily Parity (0.2.2)   search (Ctrl+Shift+R), URLs (Ctrl+Shift+O), notify\n'
+	printf '  \033[1;32md\033[0m  Server Mode (0.2.3)    one server process, many client windows, shared cache\n'
 	printf '  \033[1;32ms\033[0m  Shell               drop into %s inside this tam-last window\n' "${SHELL:-/bin/sh}"
 	printf '  \033[1;32mq\033[0m  Quit\n\n'
-	printf 'Choose [0-9, a, b, c, s, q]: '
+	printf 'Choose [0-9, a-d, s, q]: '
 
 	old=$(stty -g 2>/dev/null || true)
 	if [ -n "$old" ]; then
@@ -63,6 +64,7 @@ while :; do
 	a | A) "$DIR/demo-osc" --in-term || true ;;
 	b | B) "$DIR/demo-queries" --in-term || true ;;
 	c | C) "$DIR/demo-daily" --in-term || true ;;
+	d | D) "$DIR/demo-server" --in-term || true ;;
 	s | S) "${SHELL:-/bin/sh}" || true ;;
 	q | Q | '') break ;;
 	esac

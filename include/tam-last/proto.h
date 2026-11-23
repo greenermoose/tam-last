@@ -117,10 +117,12 @@ void tl_primary_offer_destroy(struct tl_wire *w, uint32_t offer);
 void tl_wm_base_pong(struct tl_wire *w, uint32_t wm_base, uint32_t serial);
 uint32_t tl_wm_base_get_xdg_surface(struct tl_wire *w, uint32_t wm_base,
 	uint32_t surface, void *data);
+void tl_xdg_surface_destroy(struct tl_wire *w, uint32_t xdg_surface);
 uint32_t tl_xdg_surface_get_toplevel(struct tl_wire *w, uint32_t xdg_surface,
 	void *data);
 void tl_xdg_surface_ack_configure(struct tl_wire *w, uint32_t xdg_surface,
 	uint32_t serial);
+void tl_toplevel_destroy(struct tl_wire *w, uint32_t toplevel);
 void tl_toplevel_set_title(struct tl_wire *w, uint32_t toplevel,
 	const char *title);
 void tl_toplevel_set_app_id(struct tl_wire *w, uint32_t toplevel,
@@ -129,11 +131,13 @@ void tl_toplevel_set_app_id(struct tl_wire *w, uint32_t toplevel,
 /* viewporter: draw a buffer at a size other than its own. */
 uint32_t tl_viewporter_get_viewport(struct tl_wire *w, uint32_t viewporter,
 	uint32_t surface, void *data);
+void tl_viewport_destroy(struct tl_wire *w, uint32_t viewport);
 void tl_viewport_set_destination(struct tl_wire *w, uint32_t viewport,
 	int32_t width, int32_t height);
 /* fractional-scale-v1: the compositor's preferred scale, in 120ths. */
 uint32_t tl_fractional_get(struct tl_wire *w, uint32_t manager,
 	uint32_t surface, void *data);
+void tl_fractional_destroy(struct tl_wire *w, uint32_t fractional);
 
 /* text-input-unstable-v3: input methods. */
 uint32_t tl_text_input_mgr_get(struct tl_wire *w, uint32_t mgr,

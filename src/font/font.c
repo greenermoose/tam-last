@@ -461,3 +461,132 @@ const struct tl_glyph *tl_font_glyph(struct tl_font *f, uint32_t cp,
 {
 	return tl_font_glyph_styled(f, cp, span, TL_STYLE_REGULAR);
 }
+
+static bool font_key_eq(const struct tl_font_key *a,
+	const struct tl_font_key *b)
+{
+	return a->pt_tenths == b->pt_tenths && a->dpi == b->dpi &&
+		strcmp(a->path, b->path) == 0 &&
+		strcmp(a->bold, b->bold) == 0 &&
+		strcmp(a->italic, b->italic) == 0 &&
+		strcmp(a->bold_italic, b->bold_italic) == 0 &&
+		strcmp(a->fallback, b->fallback) == 0;
+}
+
+static void font_cache_evict(struct tl_font_cache *c)
+{
+	size_t warm = 0;
+	for (size_t i = 0; i < c->len; i++) {
+		if (c->entries[i]->refcount == 0)
+			warm++;
+	}
+	while (warm > TL_FONT_CACHE_WARM) {
+		size_t victim = (size_t)-1;
+		for (size_t i = 0; i < c->len; i++) {
+			if (c->entries[i]->refcount != 0)
+				continue;
+			if (victim == (size_t)-1 ||
+			    c->entries[i]->last_used <
+			    c->entries[victim]->last_used)
+				victim = i;
+		}
+		if (victim == (size_t)-1)
+			break;
+		tl_font_close(&c->entries[victim]->font);
+		free(c->entries[victim]);
+		c->entries[victim] = c->entries[--c->len];
+		warm--;
+	}
+}
+
+void tl_font_cache_init(struct tl_font_cache *c)
+{
+	memset(c, 0, sizeof(*c));
+}
+
+struct tl_font *tl_font_cache_acquire(struct tl_font_cache *c,
+	const struct tl_font_key *key, char *err, size_t errlen)
+{
+	if (c == NULL || key == NULL || key->path[0] == '\0') {
+		if (err != NULL && errlen > 0)
+			snprintf(err, errlen, "missing font path");
+		return NULL;
+	}
+	for (size_t i = 0; i < c->len; i++) {
+		if (font_key_eq(&c->entries[i]->key, key)) {
+			c->entries[i]->refcount++;
+			c->entries[i]->last_used = ++c->clock;
+			return &c->entries[i]->font;
+		}
+	}
+
+	struct tl_font_cache_entry *e = calloc(1, sizeof(*e));
+	if (e == NULL) {
+		if (err != NULL && errlen > 0)
+			snprintf(err, errlen, "out of memory");
+		return NULL;
+	}
+	float pt = (float)key->pt_tenths / 10.0f;
+	if (tl_font_open(&e->font, key->path, pt, key->dpi, err, errlen) != 0) {
+		free(e);
+		return NULL;
+	}
+	if (key->bold[0] != '\0')
+		(void)tl_font_load_face(&e->font, TL_STYLE_BOLD, key->bold);
+	if (key->italic[0] != '\0')
+		(void)tl_font_load_face(&e->font, TL_STYLE_ITALIC, key->italic);
+	if (key->bold_italic[0] != '\0')
+		(void)tl_font_load_face(&e->font, TL_STYLE_BOLD_ITALIC,
+			key->bold_italic);
+	tl_font_load_siblings(&e->font);
+	if (key->fallback[0] != '\0')
+		(void)tl_font_add_fallback(&e->font, key->fallback);
+	tl_font_load_default_fallbacks(&e->font);
+
+	if (c->len == c->cap) {
+		size_t ncap = c->cap == 0 ? 8 : c->cap * 2;
+		struct tl_font_cache_entry **ne = realloc(c->entries,
+			ncap * sizeof(*ne));
+		if (ne == NULL) {
+			tl_font_close(&e->font);
+			free(e);
+			if (err != NULL && errlen > 0)
+				snprintf(err, errlen, "out of memory");
+			return NULL;
+		}
+		c->entries = ne;
+		c->cap = ncap;
+	}
+	e->key = *key;
+	e->refcount = 1;
+	e->last_used = ++c->clock;
+	c->entries[c->len++] = e;
+	return &e->font;
+}
+
+void tl_font_cache_release(struct tl_font_cache *c, struct tl_font *f)
+{
+	if (c == NULL || f == NULL)
+		return;
+	for (size_t i = 0; i < c->len; i++) {
+		if (&c->entries[i]->font == f) {
+			if (c->entries[i]->refcount > 0)
+				c->entries[i]->refcount--;
+			c->entries[i]->last_used = ++c->clock;
+			font_cache_evict(c);
+			return;
+		}
+	}
+}
+
+void tl_font_cache_free(struct tl_font_cache *c)
+{
+	if (c == NULL)
+		return;
+	for (size_t i = 0; i < c->len; i++) {
+		tl_font_close(&c->entries[i]->font);
+		free(c->entries[i]);
+	}
+	free(c->entries);
+	memset(c, 0, sizeof(*c));
+}

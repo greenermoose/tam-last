@@ -1,8 +1,8 @@
-/* tam-last: start-up, options, and the one event loop.
+/* tam-last: start-up, options, server/client modes, and the one event loop.
  *
- * The loop waits in poll() on three descriptors: the compositor's socket,
- * the pty, and a pipe the SIGCHLD handler writes to. It has no timeout
- * except while a key repeats, so an idle terminal uses no CPU. */
+ * One process hosts 1 window (standalone) or 0..N windows (--server) over a
+ * single Wayland display and shared font cache. The loop waits in poll() with
+ * no timeout when idle, so idle terminals and an idle server use no CPU. */
 #include <errno.h>
 #include <fcntl.h>
 #include <langinfo.h>
@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -19,6 +20,7 @@
 #include "tam-last/action.h"
 #include "tam-last/config.h"
 #include "tam-last/font.h"
+#include "tam-last/ipc.h"
 #include "tam-last/keys.h"
 #include "tam-last/osc.h"
 #include "tam-last/proto.h"
@@ -34,7 +36,6 @@
 #define TL_VERSION "unknown"
 #endif
 
-#define PAD 2
 #define DEFAULT_COLS 80
 #define DEFAULT_ROWS 24
 #define READ_CHUNK 65536
@@ -44,17 +45,22 @@
 #define TL_KEYS_BAR_ROWS 4
 #define TL_OSC52_READ_MAX 65536u
 #define TL_SYNC_TIMEOUT_MS 1000
+#define TL_SERVER_MAX_WINDOWS 64
+#define TL_SERVER_MAX_PENDING 16
 
-struct app {
+struct tl_server;
+
+struct tl_session {
+	struct tl_server *srv;
 	struct tl_window win;
 	struct tl_term term;
-	struct tl_font font;
+	struct tl_font *font; /* borrowed from srv->fonts */
 	struct tl_pty pty;
 	struct tl_kbd kbd;
 	const struct tl_layout *key_layout;
 	struct tl_compose compose;
 	struct tl_config cfg;
-	const char *font_path;
+	char font_path[512];
 	float pt;
 	int pad_logical;
 	/* The scale in 120ths (fractional-scale-v1). The window is lw x lh
@@ -67,6 +73,10 @@ struct app {
 	bool prev_focused;
 	bool need_draw;
 	bool closing;
+	bool pty_open;
+	bool child_done;
+	int exit_status;
+	int client_fd;
 	int prev_cx, prev_cy;
 	bool *buf_dirty[2];
 	int buf_dirty_rows;
@@ -106,24 +116,58 @@ struct app {
 	/* Interactive modes (0.2.2): scrollback search, URL hints, notifications. */
 	struct tl_search search;
 	struct tl_url_mode urls;
-	struct tl_actions actions;
 	enum tl_notify_policy notify_policy;
 };
 
-static int sigchld_pipe[2] = { -1, -1 };
+struct tl_pending_client {
+	int fd;
+	uint8_t *buf;
+	size_t len;
+	size_t want;
+	struct timespec deadline;
+};
+
+struct tl_server {
+	struct tl_display dpy;
+	struct tl_font_cache fonts;
+	struct tl_actions actions;
+	int listen_fd;
+	char socket_path[256];
+	struct tl_session *sessions[TL_SERVER_MAX_WINDOWS];
+	size_t nsessions;
+	struct tl_pending_client pending[TL_SERVER_MAX_PENDING];
+	bool stop;
+	int last_exit_status;
+};
+
+static int sig_pipe[2] = { -1, -1 };
 
 static void on_sigchld(int sig)
 {
 	(void)sig;
 	int saved = errno;
-	(void)!write(sigchld_pipe[1], "c", 1);
+	(void)!write(sig_pipe[1], "c", 1);
+	errno = saved;
+}
+
+static void on_sigterm(int sig)
+{
+	(void)sig;
+	int saved = errno;
+	(void)!write(sig_pipe[1], "t", 1);
 	errno = saved;
 }
 
 static void usage(FILE *out)
 {
-	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-l LAYOUT] [--term NAME] [--osc52 POLICY] [--notify POLICY] [--keys] [-e COMMAND [ARG...]]\n"
+	fputs("usage: tam-last [--server | --client] [-S SOCKET] [-N] [-c CONFIG] [-f FONT]\n"
+	      "                [-s POINTS] [-l LAYOUT] [--term NAME] [--osc52 POLICY]\n"
+	      "                [--notify POLICY] [--keys] [-e COMMAND [ARG...]]\n"
 	      "\n"
+	      "      --server       run as a multi-window server with shared font cache\n"
+	      "      --client       open a new window on a running server (also tam-last-client)\n"
+	      "  -S, --socket PATH  Unix socket path for --server / --client\n"
+	      "  -N, --no-wait      in --client mode, exit once the window is created\n"
 	      "  -c, --config FILE  configuration file (default: ~/.config/tam-last/tam-last.ini)\n"
 	      "  -f, --font FILE    a TrueType font file (default: $TAM_LAST_FONT,\n"
 	      "                     then JetBrains Mono, DejaVu Sans Mono, ...)\n"
@@ -167,7 +211,7 @@ static long ms_until(const struct timespec *t)
 	return ms < 0 ? 0 : ms;
 }
 
-static void sync_dirty(struct app *a)
+static void sync_dirty(struct tl_session *a)
 {
 	int rows = a->term.rows;
 	if (a->buf_dirty_rows != rows) {
@@ -206,7 +250,7 @@ static void sync_dirty(struct app *a)
 	}
 }
 
-static void mark_rows_dirty(struct app *a, int y0, int y1)
+static void mark_rows_dirty(struct tl_session *a, int y0, int y1)
 {
 	int rows = a->buf_dirty_rows;
 	if (y0 < 0)
@@ -221,14 +265,14 @@ static void mark_rows_dirty(struct app *a, int y0, int y1)
 	}
 }
 
-static void update_ime_cursor_rect(struct app *a)
+static void update_ime_cursor_rect(struct tl_session *a)
 {
 	if (!tl_window_has_text_input(&a->win))
 		return;
-	int dx = a->pad + a->term.cx * a->font.cell_w;
-	int dy = a->pad + a->term.cy * a->font.cell_h;
-	int dw = a->font.cell_w;
-	int dh = a->font.cell_h;
+	int dx = a->pad + a->term.cx * a->font->cell_w;
+	int dy = a->pad + a->term.cy * a->font->cell_h;
+	int dw = a->font->cell_w;
+	int dh = a->font->cell_h;
 	int32_t lx = (int32_t)(((long)dx * 120) / a->scale120);
 	int32_t ly = (int32_t)(((long)dy * 120) / a->scale120);
 	int32_t lw = (int32_t)(((long)dw * 120 + a->scale120 - 1) / a->scale120);
@@ -236,7 +280,7 @@ static void update_ime_cursor_rect(struct app *a)
 	tl_window_set_cursor_rect(&a->win, lx, ly, lw, lh);
 }
 
-static void draw(struct app *a, bool force)
+static void draw(struct tl_session *a, bool force)
 {
 	if (!a->win.configured)
 		return;
@@ -256,7 +300,8 @@ static void draw(struct app *a, bool force)
 	}
 	int idx = (b == &a->win.bufs[1]) ? 1 : 0;
 	bool full = a->buf_full[idx] || a->buf_dirty[idx] == NULL;
-	bool show_preedit = a->preedit_text != NULL && a->preedit_text[0] != '\0' &&
+	bool show_preedit = a->preedit_text != NULL &&
+		a->preedit_text[0] != '\0' &&
 		(a->term.alt_screen || a->term.view_offset == 0);
 	if (show_preedit && !full && a->buf_dirty[idx] != NULL) {
 		int y0 = a->preedit_y0 >= 0 ? a->preedit_y0 : a->term.cy;
@@ -269,11 +314,11 @@ static void draw(struct app *a, bool force)
 			if (y >= 0)
 				a->buf_dirty[idx][y] = true;
 	}
-	tl_render_rows(&a->term, &a->font, &a->term.pal, b->pixels, b->width,
+	tl_render_rows(&a->term, a->font, &a->term.pal, b->pixels, b->width,
 		b->height, a->pad, a->focused, &a->sel,
 		a->search.active ? &a->search : NULL, a->buf_dirty[idx], full);
 	if (a->urls.active)
-		tl_render_urls(&a->term, &a->font, &a->term.pal, b->pixels,
+		tl_render_urls(&a->term, a->font, &a->term.pal, b->pixels,
 			b->width, b->height, a->pad, &a->urls);
 	if (a->search.active || a->urls.active) {
 		char bar[512];
@@ -281,7 +326,7 @@ static void draw(struct app *a, bool force)
 			tl_search_format_bar(&a->search, bar, sizeof(bar));
 		else
 			tl_url_format_bar(&a->urls, bar, sizeof(bar));
-		tl_render_bar(&a->font, &a->term.pal, b->pixels, b->width,
+		tl_render_bar(a->font, &a->term.pal, b->pixels, b->width,
 			b->height, a->pad, a->term.rows - 1, a->term.cols, bar);
 		if (!full && a->buf_dirty[idx] != NULL && a->term.rows > 0)
 			a->buf_dirty[idx][a->term.rows - 1] = true;
@@ -290,13 +335,14 @@ static void draw(struct app *a, bool force)
 		struct tl_preedit pe = {
 			a->preedit_text, a->preedit_cbeg, a->preedit_cend
 		};
-		int last_y = tl_render_preedit(&a->term, &a->font, &a->term.pal,
+		int last_y = tl_render_preedit(&a->term, a->font, &a->term.pal,
 			b->pixels, b->width, b->height, a->pad, &pe);
 		if (last_y >= 0) {
 			a->preedit_y0 = a->term.cy;
 			a->preedit_y1 = last_y;
 			if (!full && a->buf_dirty[idx] != NULL) {
-				for (int y = a->preedit_y0; y <= last_y && y < a->buf_dirty_rows; y++)
+				for (int y = a->preedit_y0;
+				     y <= last_y && y < a->buf_dirty_rows; y++)
 					if (y >= 0)
 						a->buf_dirty[idx][y] = true;
 			}
@@ -311,7 +357,7 @@ static void draw(struct app *a, bool force)
 		for (int r = 0; r < a->keys_bar_rows; r++) {
 			const char *text = r < a->keys_count ?
 				a->keys_lines[r] : "";
-			tl_render_bar(&a->font, &a->term.pal, b->pixels, b->width,
+			tl_render_bar(a->font, &a->term.pal, b->pixels, b->width,
 				b->height, a->pad, a->term.rows + r,
 				a->term.cols, text);
 		}
@@ -322,7 +368,7 @@ static void draw(struct app *a, bool force)
 	struct tl_rect rects[64];
 	size_t nrects = 0;
 	if (!full) {
-		int cw = a->font.cell_w, ch = a->font.cell_h;
+		int cw = a->font->cell_w, ch = a->font->cell_h;
 		int y = 0;
 		bool overflow = false;
 		while (y < a->term.rows) {
@@ -334,7 +380,7 @@ static void draw(struct app *a, bool force)
 			while (y < a->term.rows && a->buf_dirty[idx][y])
 				y++;
 			if (nrects == sizeof(rects) / sizeof(rects[0])) {
-				nrects = 0; /* too many bands: damage whole buffer */
+				nrects = 0;
 				overflow = true;
 				break;
 			}
@@ -357,12 +403,13 @@ static void draw(struct app *a, bool force)
 	tl_window_present_damage(&a->win, b, a->lw, a->lh, rects, nrects);
 	a->buf_full[idx] = false;
 	if (a->buf_dirty[idx] != NULL)
-		memset(a->buf_dirty[idx], 0, (size_t)a->buf_dirty_rows * sizeof(bool));
+		memset(a->buf_dirty[idx], 0,
+			(size_t)a->buf_dirty_rows * sizeof(bool));
 	a->need_draw = false;
 	a->term.dirty = false;
 }
 
-static void trace_append_line(struct app *a, const char *line)
+static void trace_append_line(struct tl_session *a, const char *line)
 {
 	fputs(line, stderr);
 	fputc('\n', stderr);
@@ -382,7 +429,7 @@ static void trace_append_line(struct app *a, const char *line)
 	a->need_draw = true;
 }
 
-static void trace_key(struct app *a, uint32_t code, enum tl_key_event ev,
+static void trace_key(struct tl_session *a, uint32_t code, enum tl_key_event ev,
 	const struct tl_key_modes *m, const char *seq, size_t n,
 	const char *note)
 {
@@ -392,7 +439,7 @@ static void trace_key(struct app *a, uint32_t code, enum tl_key_event ev,
 	trace_append_line(a, line);
 }
 
-static void trace_ime(struct app *a, const char *kind, const char *text,
+static void trace_ime(struct tl_session *a, const char *kind, const char *text,
 	size_t len, int32_t cbeg, int32_t cend)
 {
 	char line[512];
@@ -400,7 +447,7 @@ static void trace_ime(struct app *a, const char *kind, const char *text,
 	trace_append_line(a, line);
 }
 
-static struct tl_key_modes key_modes(const struct app *a)
+static struct tl_key_modes key_modes(const struct tl_session *a)
 {
 	struct tl_key_modes m = {
 		a->term.app_cursor, a->term.app_keypad, a->kbd.num, a->kbd.caps,
@@ -409,7 +456,8 @@ static struct tl_key_modes key_modes(const struct app *a)
 	return m;
 }
 
-static void trace_shortcut(struct app *a, uint32_t code, const char *note)
+static void trace_shortcut(struct tl_session *a, uint32_t code,
+	const char *note)
 {
 	a->shortcut_code = code;
 	if (!a->keys_mode)
@@ -418,7 +466,7 @@ static void trace_shortcut(struct app *a, uint32_t code, const char *note)
 	trace_key(a, code, TL_KEY_PRESS, &m, NULL, 0, note);
 }
 
-static void send_key(struct app *a, uint32_t code, enum tl_key_event ev)
+static void send_key(struct tl_session *a, uint32_t code, enum tl_key_event ev)
 {
 	struct tl_key_modes m = key_modes(a);
 	char seq[TL_KEY_SEQ_MAX];
@@ -430,24 +478,24 @@ static void send_key(struct app *a, uint32_t code, enum tl_key_event ev)
 }
 
 /* Logical to device pixels, rounded as fractional-scale-v1 asks. */
-static int to_device(const struct app *a, int v)
+static int to_device(const struct tl_session *a, int v)
 {
 	return (int)(((long)v * a->scale120 + 60) / 120);
 }
 
-static int to_logical(const struct app *a, int v)
+static int to_logical(const struct tl_session *a, int v)
 {
 	return (int)(((long)v * 120 + a->scale120 - 1) / a->scale120);
 }
 
 /* Fit the grid to the window's logical size at the current scale. */
-static void layout(struct app *a)
+static void layout(struct tl_session *a)
 {
 	a->pad = to_device(a, a->pad_logical);
 	a->width = to_device(a, a->lw);
 	a->height = to_device(a, a->lh);
-	int cols = (a->width - 2 * a->pad) / a->font.cell_w;
-	int total_rows = (a->height - 2 * a->pad) / a->font.cell_h;
+	int cols = (a->width - 2 * a->pad) / a->font->cell_w;
+	int total_rows = (a->height - 2 * a->pad) / a->font->cell_h;
 	int bar_rows = 0;
 	if (a->keys_mode && total_rows > 1) {
 		bar_rows = total_rows - 1;
@@ -468,61 +516,55 @@ static void layout(struct app *a)
 
 static void on_configure(void *ud, int width, int height)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	if (width <= 0 || height <= 0) {
-		/* Ours to choose: keep the current grid. */
 		int want_rows = a->term.rows +
 			(a->keys_mode ? TL_KEYS_BAR_ROWS : 0);
-		width = to_logical(a, a->term.cols * a->font.cell_w +
+		width = to_logical(a, a->term.cols * a->font->cell_w +
 			2 * to_device(a, a->pad_logical));
-		height = to_logical(a, want_rows * a->font.cell_h +
+		height = to_logical(a, want_rows * a->font->cell_h +
 			2 * to_device(a, a->pad_logical));
 	}
 	a->lw = width;
 	a->lh = height;
 	layout(a);
-	/* A configure must be answered with a commit at the new size. */
 	draw(a, true);
 }
 
-/* The font at the size it has on this output: pt points at 96 dpi times
- * the scale, with bold/italic sibling faces and fallback fonts. */
-static int open_font(struct app *a, struct tl_font *f, char *err,
-	size_t errlen)
+static void build_font_key(const struct tl_session *a, struct tl_font_key *key)
 {
-	int dpi = (int)((96L * a->scale120 + 60) / 120);
-	if (tl_font_open(f, a->font_path, a->pt, dpi, err, errlen) != 0)
-		return -1;
-	if (a->cfg.font_bold[0] != '\0')
-		(void)tl_font_load_face(f, TL_STYLE_BOLD, a->cfg.font_bold);
-	if (a->cfg.font_italic[0] != '\0')
-		(void)tl_font_load_face(f, TL_STYLE_ITALIC, a->cfg.font_italic);
-	if (a->cfg.font_bold_italic[0] != '\0')
-		(void)tl_font_load_face(f, TL_STYLE_BOLD_ITALIC,
-			a->cfg.font_bold_italic);
-	tl_font_load_siblings(f);
-	if (a->cfg.font_fallback[0] != '\0')
-		(void)tl_font_add_fallback(f, a->cfg.font_fallback);
-	tl_font_load_default_fallbacks(f);
-	return 0;
+	memset(key, 0, sizeof(*key));
+	snprintf(key->path, sizeof(key->path), "%s", a->font_path);
+	snprintf(key->bold, sizeof(key->bold), "%s", a->cfg.font_bold);
+	snprintf(key->italic, sizeof(key->italic), "%s", a->cfg.font_italic);
+	snprintf(key->bold_italic, sizeof(key->bold_italic), "%s",
+		a->cfg.font_bold_italic);
+	snprintf(key->fallback, sizeof(key->fallback), "%s",
+		a->cfg.font_fallback);
+	key->pt_tenths = (int)(a->pt * 10.0f + 0.5f);
+	key->dpi = (int)((96L * a->scale120 + 60) / 120);
 }
 
 static void on_scale(void *ud, uint32_t scale120)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	if (scale120 == a->scale120)
 		return;
-	uint32_t old = a->scale120;
+	uint32_t old_scale = a->scale120;
 	a->scale120 = scale120;
-	struct tl_font f;
+	struct tl_font_key key;
+	build_font_key(a, &key);
 	char err[300];
-	if (open_font(a, &f, err, sizeof(err)) != 0) {
+	struct tl_font *nf = tl_font_cache_acquire(&a->srv->fonts, &key, err,
+		sizeof(err));
+	if (nf == NULL) {
 		fprintf(stderr, "tam-last: %s\n", err);
-		a->scale120 = old;
+		a->scale120 = old_scale;
 		return;
 	}
-	tl_font_close(&a->font);
-	a->font = f;
+	struct tl_font *old_font = a->font;
+	a->font = nf;
+	tl_font_cache_release(&a->srv->fonts, old_font);
 	layout(a);
 	a->term.full_dirty = true;
 	a->term.dirty = true;
@@ -531,17 +573,17 @@ static void on_scale(void *ud, uint32_t scale120)
 
 static void on_close(void *ud)
 {
-	((struct app *)ud)->closing = true;
+	((struct tl_session *)ud)->closing = true;
 }
 
 static void on_frame(void *ud)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	if (a->need_draw || a->term.dirty)
 		draw(a, false);
 }
 
-static void update_cursor_shape(struct app *a)
+static void update_cursor_shape(struct tl_session *a)
 {
 	bool mouse_app = a->term.mouse_mode != TL_MOUSE_NONE &&
 		!(tl_kbd_mods(&a->kbd) & TL_MOD_SHIFT);
@@ -551,7 +593,7 @@ static void update_cursor_shape(struct app *a)
 	tl_window_set_cursor(&a->win, shape);
 }
 
-static void send_osc52_reply(struct app *a, const char *target, bool st,
+static void send_osc52_reply(struct tl_session *a, const char *target, bool st,
 	const void *data, size_t len)
 {
 	char *b64 = NULL;
@@ -572,7 +614,7 @@ static void send_osc52_reply(struct app *a, const char *target, bool st,
 	free(b64);
 }
 
-static void finish_osc52_read(struct app *a)
+static void finish_osc52_read(struct tl_session *a)
 {
 	send_osc52_reply(a, a->osc52_target, a->osc52_st,
 		a->osc52_buf != NULL ? a->osc52_buf : "", a->osc52_len);
@@ -583,7 +625,7 @@ static void finish_osc52_read(struct app *a)
 	a->osc52_len = 0;
 }
 
-static void drain_osc52_read(struct app *a)
+static void drain_osc52_read(struct tl_session *a)
 {
 	char buf[4096];
 	for (;;) {
@@ -594,7 +636,8 @@ static void drain_osc52_read(struct app *a)
 				if (a->osc52_len + take > TL_OSC52_READ_MAX)
 					take = TL_OSC52_READ_MAX - a->osc52_len;
 				if (a->osc52_len + take > a->osc52_cap) {
-					size_t ncap = a->osc52_cap == 0 ? 4096 : a->osc52_cap * 2;
+					size_t ncap = a->osc52_cap == 0 ? 4096 :
+						a->osc52_cap * 2;
 					while (ncap < a->osc52_len + take)
 						ncap *= 2;
 					if (ncap > TL_OSC52_READ_MAX)
@@ -608,7 +651,8 @@ static void drain_osc52_read(struct app *a)
 					}
 				}
 				if (take > 0) {
-					memcpy(a->osc52_buf + a->osc52_len, buf, take);
+					memcpy(a->osc52_buf + a->osc52_len, buf,
+						take);
 					a->osc52_len += take;
 				}
 			}
@@ -623,7 +667,7 @@ static void drain_osc52_read(struct app *a)
 	}
 }
 
-static void handle_term_osc(struct app *a)
+static void handle_term_osc(struct tl_session *a)
 {
 	if (a->term.title_dirty) {
 		tl_window_set_title(&a->win,
@@ -655,10 +699,11 @@ static void handle_term_osc(struct app *a)
 			snprintf(a->osc52_target, sizeof(a->osc52_target),
 				"%s", a->term.osc52_read_target);
 		} else {
+			const struct tl_display *dpy = &a->srv->dpy;
 			const char *local = a->term.osc52_read_prim ?
-				a->win.prim_text : a->win.clip_text;
+				dpy->prim_text : dpy->clip_text;
 			size_t local_len = a->term.osc52_read_prim ?
-				a->win.prim_len : a->win.clip_len;
+				dpy->prim_len : dpy->clip_len;
 			send_osc52_reply(a, a->term.osc52_read_target,
 				a->term.osc52_read_st,
 				local != NULL ? local : "",
@@ -672,13 +717,13 @@ static void handle_term_osc(struct app *a)
 		else if (a->notify_policy == TL_NOTIFY_UNFOCUSED)
 			allow = !a->focused;
 		if (allow)
-			(void)tl_action_notify(&a->actions, &a->term.notify,
-				NULL, 0);
+			(void)tl_action_notify(&a->srv->actions,
+				&a->term.notify, NULL, 0);
 		tl_term_notify_clear(&a->term);
 	}
 }
 
-static void start_paste(struct app *a, bool primary)
+static void start_paste(struct tl_session *a, bool primary)
 {
 	if (a->paste_fd >= 0) {
 		close(a->paste_fd);
@@ -695,13 +740,12 @@ static void start_paste(struct app *a, bool primary)
 		(void)tl_pty_queue(&a->pty, "\033[200~", 6);
 }
 
-static void drain_paste(struct app *a)
+static void drain_paste(struct tl_session *a)
 {
 	char buf[4096];
 	for (;;) {
 		ssize_t n = read(a->paste_fd, buf, sizeof(buf));
 		if (n > 0) {
-			/* Strip ESC when bracketed so pasted data cannot close \033[201~. */
 			if (a->paste_bracketed) {
 				for (ssize_t i = 0; i < n; i++)
 					if (buf[i] == '\033')
@@ -714,7 +758,6 @@ static void drain_paste(struct app *a)
 			continue;
 		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
 			return;
-		/* EOF or error: finish paste. */
 		if (a->paste_bracketed)
 			(void)tl_pty_queue(&a->pty, "\033[201~", 6);
 		a->paste_bracketed = false;
@@ -724,19 +767,19 @@ static void drain_paste(struct app *a)
 	}
 }
 
-static bool mouse_reporting(const struct app *a)
+static bool mouse_reporting(const struct tl_session *a)
 {
 	return a->term.mouse_mode != TL_MOUSE_NONE &&
 		!(tl_kbd_mods(&a->kbd) & TL_MOD_SHIFT);
 }
 
-static void ptr_to_cell(const struct app *a, double lx, double ly,
+static void ptr_to_cell(const struct tl_session *a, double lx, double ly,
 	int *cx, int *cy)
 {
 	double dx = lx * (double)a->scale120 / 120.0;
 	double dy = ly * (double)a->scale120 / 120.0;
-	int x = (int)((dx - a->pad) / a->font.cell_w);
-	int y = (int)((dy - a->pad) / a->font.cell_h);
+	int x = (int)((dx - a->pad) / a->font->cell_w);
+	int y = (int)((dy - a->pad) / a->font->cell_h);
 	if (x < 0)
 		x = 0;
 	if (x >= a->term.cols)
@@ -749,7 +792,7 @@ static void ptr_to_cell(const struct app *a, double lx, double ly,
 	*cy = y;
 }
 
-static int mouse_mod_bits(const struct app *a)
+static int mouse_mod_bits(const struct tl_session *a)
 {
 	unsigned m = tl_kbd_mods(&a->kbd);
 	int bits = 0;
@@ -762,7 +805,8 @@ static int mouse_mod_bits(const struct app *a)
 	return bits;
 }
 
-static void send_mouse(struct app *a, int cb, int cx, int cy, bool release)
+static void send_mouse(struct tl_session *a, int cb, int cx, int cy,
+	bool release)
 {
 	cb |= mouse_mod_bits(a);
 	if (a->term.mouse_sgr) {
@@ -789,7 +833,7 @@ static void send_mouse(struct app *a, int cb, int cx, int cy, bool release)
 	(void)tl_pty_queue(&a->pty, pkt, sizeof(pkt));
 }
 
-static int view_abs_y(const struct app *a, int cy)
+static int view_abs_y(const struct tl_session *a, int cy)
 {
 	int sb = a->term.alt_screen ? 0 : a->term.sb_len;
 	int vo = a->term.alt_screen ? 0 : a->term.view_offset;
@@ -798,7 +842,7 @@ static int view_abs_y(const struct app *a, int cy)
 
 static void on_key(void *ud, uint32_t code, bool pressed)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	tl_kbd_key(&a->kbd, code, pressed);
 	update_cursor_shape(a);
 	if (!pressed) {
@@ -1012,7 +1056,6 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 	if (!tl_key_is_modifier(code))
 		tl_term_reset_view(&a->term);
 
-	/* Compose and dead-key handling (when no Ctrl/Alt/Meta is held). */
 	bool ctrl_alt_meta = (mods & (TL_MOD_CTRL | TL_MOD_ALT | TL_MOD_META)) != 0;
 	if (!ctrl_alt_meta && code == TL_KEY_COMPOSE) {
 		uint32_t dummy = 0;
@@ -1082,7 +1125,7 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 	}
 }
 
-static void update_hover_link(struct app *a)
+static void update_hover_link(struct tl_session *a)
 {
 	uint32_t lid = 0;
 	if (a->ptr_inside) {
@@ -1105,7 +1148,7 @@ static void update_hover_link(struct app *a)
 
 static void on_pointer_enter(void *ud, double x, double y)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	a->ptr_inside = true;
 	ptr_to_cell(a, x, y, &a->ptr_cx, &a->ptr_cy);
 	update_hover_link(a);
@@ -1114,14 +1157,14 @@ static void on_pointer_enter(void *ud, double x, double y)
 
 static void on_pointer_leave(void *ud)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	a->ptr_inside = false;
 	update_hover_link(a);
 }
 
 static void on_pointer_motion(void *ud, double x, double y)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	int cx, cy;
 	ptr_to_cell(a, x, y, &cx, &cy);
 	bool moved = (cx != a->ptr_cx || cy != a->ptr_cy);
@@ -1140,7 +1183,8 @@ static void on_pointer_motion(void *ud, double x, double y)
 	}
 	if (mouse_reporting(a)) {
 		if (a->term.mouse_mode == TL_MOUSE_ANY ||
-		    (a->term.mouse_mode == TL_MOUSE_DRAG && a->ptr_buttons != 0)) {
+		    (a->term.mouse_mode == TL_MOUSE_DRAG &&
+		     a->ptr_buttons != 0)) {
 			int btn = (a->ptr_buttons & 1) ? 0 :
 				  (a->ptr_buttons & 2) ? 1 :
 				  (a->ptr_buttons & 4) ? 2 : 3;
@@ -1152,7 +1196,7 @@ static void on_pointer_motion(void *ud, double x, double y)
 static void on_pointer_button(void *ud, uint32_t button, bool pressed,
 	uint32_t time)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	int btn_idx = button == TL_BTN_LEFT ? 0 :
 		      button == TL_BTN_MIDDLE ? 1 :
 		      button == TL_BTN_RIGHT ? 2 : -1;
@@ -1181,7 +1225,8 @@ static void on_pointer_button(void *ud, uint32_t button, bool pressed,
 			else
 				a->click_count = 1;
 			a->last_click_time = time;
-			enum tl_sel_kind kind = a->click_count == 2 ? TL_SEL_WORD :
+			enum tl_sel_kind kind =
+				a->click_count == 2 ? TL_SEL_WORD :
 				a->click_count == 3 ? TL_SEL_LINE : TL_SEL_CHAR;
 			tl_sel_start(&a->sel, &a->term, a->ptr_cx,
 				view_abs_y(a, a->ptr_cy), kind);
@@ -1205,7 +1250,7 @@ static void on_pointer_button(void *ud, uint32_t button, bool pressed,
 static void on_pointer_axis(void *ud, uint32_t axis, double value,
 	int32_t v120)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	if (axis != 0)
 		return;
 	double step = v120 != 0 ? (double)v120 / 120.0 : value / 15.0;
@@ -1221,14 +1266,14 @@ static void on_pointer_axis(void *ud, uint32_t axis, double value,
 			send_mouse(a, cb, a->ptr_cx, a->ptr_cy, false);
 		return;
 	}
-	/* Negative axis is scroll up (into scrollback). */
 	tl_term_scroll_view(&a->term, -notches * 3);
 	draw(a, false);
 }
 
 static void on_focus_in(void *ud, const uint32_t *codes, size_t n)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
+	tl_display_repeat_info(&a->srv->dpy, &a->repeat_rate, &a->repeat_delay);
 	tl_kbd_enter(&a->kbd, codes, n);
 	a->focused = true;
 	draw(a, false);
@@ -1236,7 +1281,7 @@ static void on_focus_in(void *ud, const uint32_t *codes, size_t n)
 
 static void on_focus_out(void *ud)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	tl_kbd_leave(&a->kbd);
 	tl_compose_reset(&a->compose);
 	a->repeat_code = 0;
@@ -1247,12 +1292,12 @@ static void on_focus_out(void *ud)
 static void on_modifiers(void *ud, uint32_t depressed, uint32_t locked)
 {
 	(void)depressed;
-	tl_kbd_locks(&((struct app *)ud)->kbd, locked);
+	tl_kbd_locks(&((struct tl_session *)ud)->kbd, locked);
 }
 
 static void on_repeat_info(void *ud, int32_t rate, int32_t delay)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	a->repeat_rate = rate > 1000 ? 1000 : rate;
 	a->repeat_delay = delay < 0 ? 0 : delay;
 }
@@ -1260,7 +1305,7 @@ static void on_repeat_info(void *ud, int32_t rate, int32_t delay)
 static void on_ime_preedit(void *ud, const char *text, int32_t cursor_begin,
 	int32_t cursor_end)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	bool had = a->preedit_text != NULL && a->preedit_text[0] != '\0';
 	bool has = text != NULL && text[0] != '\0';
 	if (!had && !has)
@@ -1292,7 +1337,7 @@ static void on_ime_preedit(void *ud, const char *text, int32_t cursor_begin,
 
 static void on_ime_commit(void *ud, const char *text, size_t len)
 {
-	struct app *a = ud;
+	struct tl_session *a = ud;
 	if (text == NULL || len == 0)
 		return;
 	if (a->search.active) {
@@ -1319,7 +1364,7 @@ static const struct tl_window_events events = {
 	on_ime_preedit, on_ime_commit,
 };
 
-static void update_sync_timer(struct app *a)
+static void update_sync_timer(struct tl_session *a)
 {
 	if (a->term.sync_output && !a->sync_armed) {
 		clock_gettime(CLOCK_MONOTONIC, &a->sync_deadline);
@@ -1331,7 +1376,7 @@ static void update_sync_timer(struct app *a)
 }
 
 /* Read what the program wrote. Returns false at end of file. */
-static bool read_pty(struct app *a)
+static bool read_pty(struct tl_session *a)
 {
 	static unsigned char buf[READ_CHUNK];
 	for (int i = 0; i < 4; i++) {
@@ -1344,35 +1389,580 @@ static bool read_pty(struct app *a)
 			continue;
 		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
 			return true;
-		return false; /* 0, or EIO once the last slave fd closed */
+		return false;
 	}
 	return true;
 }
 
-/* Reap the child; returns true once it has exited. */
-static bool reap(struct app *a, int *status)
+static bool reap_session(struct tl_session *a)
 {
 	int st;
 	pid_t r = waitpid(a->pty.pid, &st, WNOHANG);
 	if (r != a->pty.pid)
 		return false;
 	if (WIFEXITED(st))
-		*status = WEXITSTATUS(st);
+		a->exit_status = WEXITSTATUS(st);
 	else if (WIFSIGNALED(st))
-		*status = 128 + WTERMSIG(st);
+		a->exit_status = 128 + WTERMSIG(st);
 	return true;
+}
+
+static int session_create(struct tl_server *srv,
+	const struct tl_ipc_launch *req, int client_fd,
+	char *err, size_t errlen)
+{
+	if (srv->nsessions >= TL_SERVER_MAX_WINDOWS) {
+		snprintf(err, errlen, "too many open windows (max %d)",
+			TL_SERVER_MAX_WINDOWS);
+		return -1;
+	}
+	struct tl_session *a = calloc(1, sizeof(*a));
+	if (a == NULL) {
+		snprintf(err, errlen, "out of memory");
+		return -1;
+	}
+	a->srv = srv;
+	a->pty.master = -1;
+	a->paste_fd = -1;
+	a->osc52_fd = -1;
+	a->client_fd = client_fd;
+	a->preedit_y0 = a->preedit_y1 = -1;
+	a->keys_mode = (req->flags & TL_IPC_F_KEYS_MODE) != 0;
+	if (a->keys_mode) {
+		a->keys_bar_rows = TL_KEYS_BAR_ROWS;
+		snprintf(a->keys_lines[0], sizeof(a->keys_lines[0]),
+			"keys: press any key (last %d events here; full log on stderr)",
+			TL_KEYS_BAR_ROWS);
+		a->keys_count = 1;
+		a->buf_bar_dirty[0] = a->buf_bar_dirty[1] = true;
+	}
+
+	tl_config_default(&a->cfg);
+	if (req->config_path != NULL && req->config_path[0] != '\0') {
+		if (tl_config_load_file(&a->cfg, req->config_path) != 0)
+			fprintf(stderr, "tam-last: cannot read config %s\n",
+				req->config_path);
+	} else {
+		char def_cfg[512];
+		tl_config_default_path(def_cfg, sizeof(def_cfg));
+		if (def_cfg[0] != '\0')
+			(void)tl_config_load_file(&a->cfg, def_cfg);
+	}
+	a->pad_logical = a->cfg.pad;
+
+	const char *want_layout =
+		(req->layout_name != NULL && req->layout_name[0] != '\0') ?
+		req->layout_name : a->cfg.layout;
+	a->key_layout = tl_layout_find(want_layout);
+	if (a->key_layout == NULL) {
+		snprintf(err, errlen, "unknown layout: %s", want_layout);
+		free(a);
+		return -1;
+	}
+	tl_kbd_init(&a->kbd);
+	tl_kbd_set_layout(&a->kbd, a->key_layout);
+	tl_compose_init(&a->compose);
+	tl_display_repeat_info(&srv->dpy, &a->repeat_rate, &a->repeat_delay);
+
+	const char *want_font =
+		(req->font_path != NULL && req->font_path[0] != '\0') ?
+		req->font_path :
+		(a->cfg.font[0] != '\0' ? a->cfg.font : NULL);
+	const char *resolved_font = tl_font_find(want_font);
+	if (resolved_font == NULL) {
+		snprintf(err, errlen, "no font found; use --font FILE");
+		free(a);
+		return -1;
+	}
+	snprintf(a->font_path, sizeof(a->font_path), "%s", resolved_font);
+	a->pt = (req->flags & TL_IPC_F_PT_SET) ? req->pt : a->cfg.size;
+	a->scale120 = 120;
+
+	struct tl_font_key fkey;
+	build_font_key(a, &fkey);
+	a->font = tl_font_cache_acquire(&srv->fonts, &fkey, err, errlen);
+	if (a->font == NULL) {
+		free(a);
+		return -1;
+	}
+	if (tl_term_init(&a->term, DEFAULT_COLS, DEFAULT_ROWS) != 0) {
+		snprintf(err, errlen, "out of memory");
+		tl_font_cache_release(&srv->fonts, a->font);
+		free(a);
+		return -1;
+	}
+	tl_term_set_palette(&a->term, &a->cfg.pal);
+	tl_term_set_osc52_policy(&a->term,
+		(req->flags & TL_IPC_F_OSC52_SET) ?
+		(enum tl_osc52_policy)req->osc52 : a->cfg.osc52);
+	a->notify_policy = (req->flags & TL_IPC_F_NOTIFY_SET) ?
+		(enum tl_notify_policy)req->notify : a->cfg.notify;
+
+	a->pad = a->pad_logical;
+	int init_rows = DEFAULT_ROWS + (a->keys_mode ? TL_KEYS_BAR_ROWS : 0);
+	a->width = a->lw = DEFAULT_COLS * a->font->cell_w + 2 * a->pad_logical;
+	a->height = a->lh = init_rows * a->font->cell_h + 2 * a->pad_logical;
+
+	const char *want_term =
+		(req->term_name != NULL && req->term_name[0] != '\0') ?
+		req->term_name : (a->cfg.term[0] != '\0' ? a->cfg.term : NULL);
+	char *const *cmd = (req->argc > 0 && req->argv != NULL) ?
+		req->argv : NULL;
+	if (tl_pty_spawn_in(&a->pty, cmd, want_term, req->cwd, req->shell,
+		    a->term.cols, a->term.rows, a->width, a->height,
+		    err, errlen) != 0) {
+		tl_term_free(&a->term);
+		tl_font_cache_release(&srv->fonts, a->font);
+		free(a);
+		return -1;
+	}
+	if (tl_window_open_on(&a->win, &srv->dpy, "tam-last", "tam-last",
+		    &events, a) != 0) {
+		snprintf(err, errlen, "%s", srv->dpy.err);
+		kill(-a->pty.pid, SIGHUP);
+		tl_pty_close(&a->pty);
+		tl_term_free(&a->term);
+		tl_font_cache_release(&srv->fonts, a->font);
+		free(a);
+		return -1;
+	}
+	a->pty_open = true;
+	srv->sessions[srv->nsessions++] = a;
+	return 0;
+}
+
+static void session_destroy(struct tl_server *srv, size_t idx)
+{
+	struct tl_session *a = srv->sessions[idx];
+	srv->last_exit_status = a->exit_status;
+
+	if (!a->child_done)
+		kill(-a->pty.pid, SIGHUP);
+	if (a->client_fd >= 0) {
+		uint8_t msg[32];
+		size_t n = tl_ipc_encode_exit(a->exit_status, msg, sizeof(msg));
+		if (n > 0)
+			(void)tl_ipc_write_all(a->client_fd, msg, n);
+		close(a->client_fd);
+		a->client_fd = -1;
+	}
+	tl_search_free(&a->search);
+	tl_url_end(&a->urls);
+	if (a->paste_fd >= 0)
+		close(a->paste_fd);
+	if (a->osc52_fd >= 0)
+		close(a->osc52_fd);
+	free(a->osc52_buf);
+	free(a->preedit_text);
+	free(a->buf_dirty[0]);
+	free(a->buf_dirty[1]);
+	tl_window_close(&a->win);
+	tl_pty_close(&a->pty);
+	tl_term_free(&a->term);
+	tl_font_cache_release(&srv->fonts, a->font);
+	free(a);
+
+	for (size_t j = idx + 1; j < srv->nsessions; j++)
+		srv->sessions[j - 1] = srv->sessions[j];
+	srv->nsessions--;
+}
+
+static void send_ipc_ack(int fd, uint8_t status, const char *msg)
+{
+	uint8_t buf[512];
+	size_t n = tl_ipc_encode_ack(status, msg, buf, sizeof(buf));
+	if (n > 0)
+		(void)tl_ipc_write_all(fd, buf, n);
+}
+
+static void pending_close(struct tl_pending_client *pc)
+{
+	if (pc->fd >= 0)
+		close(pc->fd);
+	free(pc->buf);
+	pc->fd = -1;
+	pc->buf = NULL;
+	pc->len = pc->want = 0;
+}
+
+static void accept_clients(struct tl_server *srv)
+{
+	for (;;) {
+		int fd = accept(srv->listen_fd, NULL, NULL);
+		if (fd < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		fcntl(fd, F_SETFD, FD_CLOEXEC);
+		fcntl(fd, F_SETFL, O_NONBLOCK);
+		struct tl_pending_client *slot = NULL;
+		for (size_t i = 0; i < TL_SERVER_MAX_PENDING; i++) {
+			if (srv->pending[i].fd < 0) {
+				slot = &srv->pending[i];
+				break;
+			}
+		}
+		if (slot == NULL) {
+			send_ipc_ack(fd, 1, "server busy");
+			close(fd);
+			continue;
+		}
+		slot->buf = malloc(TL_IPC_MAX_MSG);
+		if (slot->buf == NULL) {
+			send_ipc_ack(fd, 1, "out of memory");
+			close(fd);
+			continue;
+		}
+		slot->fd = fd;
+		slot->len = 0;
+		slot->want = 0;
+		clock_gettime(CLOCK_MONOTONIC, &slot->deadline);
+		ts_add_ms(&slot->deadline, TL_IPC_HANDSHAKE_TIMEOUT_MS);
+	}
+}
+
+static void handle_pending_client(struct tl_server *srv,
+	struct tl_pending_client *pc)
+{
+	for (;;) {
+		size_t cap = pc->want > 0 ? pc->want : TL_IPC_HDR_LEN;
+		if (pc->len >= cap)
+			break;
+		ssize_t n = read(pc->fd, pc->buf + pc->len, cap - pc->len);
+		if (n > 0) {
+			pc->len += (size_t)n;
+			if (pc->want == 0 && pc->len >= TL_IPC_HDR_LEN) {
+				pc->want = tl_ipc_frame_len(pc->buf);
+				if (pc->want == 0 || pc->want > TL_IPC_MAX_MSG) {
+					send_ipc_ack(pc->fd, 1,
+						"malformed request");
+					pending_close(pc);
+					return;
+				}
+			}
+			continue;
+		}
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+			return;
+		pending_close(pc);
+		return;
+	}
+	if (pc->want == 0 || pc->len < pc->want)
+		return;
+
+	struct tl_ipc_launch req;
+	if (tl_ipc_decode_launch(pc->buf, pc->len, &req) != 0) {
+		send_ipc_ack(pc->fd, 1, "malformed launch request");
+		pending_close(pc);
+		return;
+	}
+	bool no_wait = (req.flags & TL_IPC_F_NO_WAIT) != 0;
+	int pass_fd = no_wait ? -1 : pc->fd;
+	char err[256];
+	if (session_create(srv, &req, pass_fd, err, sizeof(err)) != 0) {
+		send_ipc_ack(pc->fd, 1, err);
+		tl_ipc_launch_free(&req);
+		pending_close(pc);
+		return;
+	}
+	send_ipc_ack(pc->fd, 0, NULL);
+	tl_ipc_launch_free(&req);
+	if (no_wait) {
+		pending_close(pc);
+	} else {
+		/* Ownership of pc->fd transferred to the new session. */
+		free(pc->buf);
+		pc->fd = -1;
+		pc->buf = NULL;
+		pc->len = pc->want = 0;
+	}
 }
 
 static void setup_locale(void)
 {
-	/* wcwidth needs a UTF-8 locale for character widths. */
 	if (setlocale(LC_CTYPE, "") == NULL ||
 	    strcmp(nl_langinfo(CODESET), "UTF-8") != 0)
 		setlocale(LC_CTYPE, "C.UTF-8");
 }
 
+static const char *path_basename(const char *p)
+{
+	if (p == NULL)
+		return "";
+	const char *slash = strrchr(p, '/');
+	return slash != NULL ? slash + 1 : p;
+}
+
+static int run_server_loop(struct tl_server *srv)
+{
+	bool is_server = srv->listen_fd >= 0;
+
+	/* Fixed upper bound on pollfds: 3 global + pending + 4 per session. */
+	enum { MAX_FDS = 3 + TL_SERVER_MAX_PENDING + 4 * TL_SERVER_MAX_WINDOWS };
+	struct pollfd fds[MAX_FDS];
+	int pty_idx[TL_SERVER_MAX_WINDOWS];
+	int paste_idx[TL_SERVER_MAX_WINDOWS];
+	int osc52_idx[TL_SERVER_MAX_WINDOWS];
+	int cli_idx[TL_SERVER_MAX_WINDOWS];
+	int pend_idx[TL_SERVER_MAX_PENDING];
+
+	while (!srv->stop && (is_server || srv->nsessions > 0)) {
+		bool pty_more[TL_SERVER_MAX_WINDOWS];
+		for (size_t i = 0; i < srv->nsessions; i++) {
+			struct tl_session *a = srv->sessions[i];
+			handle_term_osc(a);
+			update_sync_timer(a);
+			if (a->term.reply_len > 0) {
+				(void)tl_pty_queue(&a->pty, a->term.reply,
+					a->term.reply_len);
+				a->term.reply_len = 0;
+			}
+			update_cursor_shape(a);
+			if ((a->term.dirty || a->need_draw) &&
+			    !a->term.sync_output)
+				draw(a, false);
+			int pm = a->pty_open ? tl_pty_flush(&a->pty) : 0;
+			if (pm < 0)
+				a->pty_open = false;
+			pty_more[i] = pm > 0;
+		}
+
+		int wl_more = tl_display_flush(&srv->dpy);
+		if (wl_more < 0) {
+			fprintf(stderr, "tam-last: %s\n", srv->dpy.err);
+			break;
+		}
+
+		nfds_t nfds = 0;
+		fds[nfds++] = (struct pollfd){
+			tl_display_fd(&srv->dpy),
+			(short)(POLLIN | (wl_more ? POLLOUT : 0)), 0
+		};
+		fds[nfds++] = (struct pollfd){ sig_pipe[0], POLLIN, 0 };
+		int listen_slot = -1;
+		if (is_server) {
+			listen_slot = (int)nfds;
+			fds[nfds++] = (struct pollfd){
+				srv->listen_fd, POLLIN, 0
+			};
+		}
+		for (size_t i = 0; i < TL_SERVER_MAX_PENDING; i++) {
+			if (srv->pending[i].fd >= 0) {
+				pend_idx[i] = (int)nfds;
+				fds[nfds++] = (struct pollfd){
+					srv->pending[i].fd, POLLIN, 0
+				};
+			} else {
+				pend_idx[i] = -1;
+			}
+		}
+		for (size_t i = 0; i < srv->nsessions; i++) {
+			struct tl_session *a = srv->sessions[i];
+			if (a->pty_open && a->pty.master >= 0) {
+				pty_idx[i] = (int)nfds;
+				fds[nfds++] = (struct pollfd){
+					a->pty.master,
+					(short)(POLLIN | (pty_more[i] ? POLLOUT : 0)),
+					0
+				};
+			} else {
+				pty_idx[i] = -1;
+			}
+			if (a->paste_fd >= 0) {
+				paste_idx[i] = (int)nfds;
+				fds[nfds++] = (struct pollfd){
+					a->paste_fd, POLLIN, 0
+				};
+			} else {
+				paste_idx[i] = -1;
+			}
+			if (a->osc52_fd >= 0) {
+				osc52_idx[i] = (int)nfds;
+				fds[nfds++] = (struct pollfd){
+					a->osc52_fd, POLLIN, 0
+				};
+			} else {
+				osc52_idx[i] = -1;
+			}
+			if (a->client_fd >= 0) {
+				cli_idx[i] = (int)nfds;
+				fds[nfds++] = (struct pollfd){
+					a->client_fd, POLLIN, 0
+				};
+			} else {
+				cli_idx[i] = -1;
+			}
+		}
+
+		int timeout = -1;
+		for (size_t i = 0; i < srv->nsessions; i++) {
+			struct tl_session *a = srv->sessions[i];
+			if (a->repeat_code != 0 && a->focused) {
+				int rm = (int)ms_until(&a->repeat_at);
+				if (timeout < 0 || rm < timeout)
+					timeout = rm;
+			}
+			if (a->term.sync_output && a->sync_armed) {
+				int sm = (int)ms_until(&a->sync_deadline);
+				if (timeout < 0 || sm < timeout)
+					timeout = sm;
+			}
+		}
+		for (size_t i = 0; i < TL_SERVER_MAX_PENDING; i++) {
+			if (srv->pending[i].fd >= 0) {
+				int pm = (int)ms_until(&srv->pending[i].deadline);
+				if (timeout < 0 || pm < timeout)
+					timeout = pm;
+			}
+		}
+		int am = tl_action_next_timeout_ms(&srv->actions);
+		if (am >= 0 && (timeout < 0 || am < timeout))
+			timeout = am;
+
+		if (poll(fds, nfds, timeout) < 0 && errno != EINTR) {
+			perror("tam-last: poll");
+			break;
+		}
+
+		if (fds[0].revents & POLLIN) {
+			if (tl_display_dispatch(&srv->dpy) != 0) {
+				fprintf(stderr, "tam-last: %s\n", srv->dpy.err);
+				break;
+			}
+		} else if (fds[0].revents & (POLLERR | POLLHUP)) {
+			fprintf(stderr, "tam-last: the compositor went away\n");
+			break;
+		}
+
+		if (fds[1].revents & POLLIN) {
+			char drain[64];
+			ssize_t n;
+			while ((n = read(sig_pipe[0], drain, sizeof(drain))) > 0) {
+				for (ssize_t k = 0; k < n; k++)
+					if (drain[k] == 't')
+						srv->stop = true;
+			}
+			for (size_t i = 0; i < srv->nsessions; i++) {
+				if (!srv->sessions[i]->child_done)
+					srv->sessions[i]->child_done =
+						reap_session(srv->sessions[i]);
+			}
+			tl_action_reap(&srv->actions);
+		}
+
+		if (listen_slot >= 0 && (fds[listen_slot].revents & POLLIN))
+			accept_clients(srv);
+
+		for (size_t i = 0; i < TL_SERVER_MAX_PENDING; i++) {
+			if (srv->pending[i].fd < 0)
+				continue;
+			if (pend_idx[i] >= 0 &&
+			    (fds[pend_idx[i]].revents &
+			     (POLLIN | POLLHUP | POLLERR)))
+				handle_pending_client(srv, &srv->pending[i]);
+			if (srv->pending[i].fd >= 0 &&
+			    ms_until(&srv->pending[i].deadline) == 0)
+				pending_close(&srv->pending[i]);
+		}
+
+		/* Iterate only over sessions that existed when poll() ran. */
+		size_t n_polled = srv->nsessions;
+		for (size_t i = 0; i < n_polled; i++) {
+			struct tl_session *a = srv->sessions[i];
+			if (pty_idx[i] >= 0 && a->pty_open &&
+			    (fds[pty_idx[i]].revents &
+			     (POLLIN | POLLHUP | POLLERR))) {
+				a->pty_open = read_pty(a);
+				update_sync_timer(a);
+			}
+			if (paste_idx[i] >= 0 && a->paste_fd >= 0 &&
+			    (fds[paste_idx[i]].revents &
+			     (POLLIN | POLLHUP | POLLERR)))
+				drain_paste(a);
+			if (osc52_idx[i] >= 0 && a->osc52_fd >= 0 &&
+			    (fds[osc52_idx[i]].revents &
+			     (POLLIN | POLLHUP | POLLERR)))
+				drain_osc52_read(a);
+			if (cli_idx[i] >= 0 && a->client_fd >= 0 &&
+			    (fds[cli_idx[i]].revents &
+			     (POLLIN | POLLHUP | POLLERR))) {
+				/* Waiting client disconnected (e.g. killed). */
+				char dummy;
+				ssize_t r = read(a->client_fd, &dummy, 1);
+				if (r <= 0 && errno != EAGAIN &&
+				    errno != EWOULDBLOCK) {
+					close(a->client_fd);
+					a->client_fd = -1;
+				}
+			}
+		}
+
+		for (size_t i = 0; i < srv->nsessions; i++) {
+			struct tl_session *a = srv->sessions[i];
+			if (a->repeat_code != 0 && a->focused &&
+			    ms_until(&a->repeat_at) == 0) {
+				send_key(a, a->repeat_code, TL_KEY_REPEAT);
+				ts_add_ms(&a->repeat_at, 1000 / a->repeat_rate);
+			}
+			if (a->term.sync_output && a->sync_armed &&
+			    ms_until(&a->sync_deadline) == 0) {
+				a->term.sync_output = false;
+				a->sync_armed = false;
+			}
+		}
+		(void)tl_action_check_deadlines(&srv->actions);
+
+		/* Finalize and remove any finished or closed sessions. */
+		for (size_t i = 0; i < srv->nsessions; ) {
+			struct tl_session *a = srv->sessions[i];
+			if (!a->closing && !a->child_done && a->pty_open) {
+				i++;
+				continue;
+			}
+			if (!a->closing) {
+				if (a->pty_open)
+					a->pty_open = read_pty(a);
+				if (!a->child_done)
+					a->child_done = reap_session(a);
+				if (!a->child_done) {
+					struct pollfd sp = { sig_pipe[0], POLLIN, 0 };
+					if (poll(&sp, 1, 50) > 0)
+						a->child_done = reap_session(a);
+				}
+				if (a->term.dirty)
+					draw(a, true);
+			}
+			session_destroy(srv, i);
+			(void)tl_display_flush(&srv->dpy);
+		}
+	}
+
+	while (srv->nsessions > 0)
+		session_destroy(srv, srv->nsessions - 1);
+	for (size_t i = 0; i < TL_SERVER_MAX_PENDING; i++)
+		pending_close(&srv->pending[i]);
+	tl_actions_kill_all(&srv->actions);
+	if (srv->listen_fd >= 0) {
+		close(srv->listen_fd);
+		srv->listen_fd = -1;
+		if (srv->socket_path[0] != '\0')
+			unlink(srv->socket_path);
+	}
+	tl_display_close(&srv->dpy);
+	tl_font_cache_free(&srv->fonts);
+	return is_server ? 0 : srv->last_exit_status;
+}
+
 int main(int argc, char **argv)
 {
+	bool server_mode = false;
+	bool client_mode = strcmp(path_basename(argv[0]),
+		"tam-last-client") == 0;
+	bool no_wait = false;
+	const char *socket_path = NULL;
 	const char *config_path = NULL;
 	const char *font_path = NULL;
 	const char *layout_name = NULL;
@@ -1385,6 +1975,7 @@ int main(int argc, char **argv)
 	bool pt_set = false;
 	bool keys_mode = false;
 	char **cmd = NULL;
+	size_t cmd_argc = 0;
 
 	for (int i = 1; i < argc; i++) {
 		const char *s = argv[i];
@@ -1394,7 +1985,18 @@ int main(int argc, char **argv)
 				return 2;
 			}
 			cmd = argv + i + 1;
+			cmd_argc = (size_t)(argc - i - 1);
 			break;
+		} else if (strcmp(s, "--server") == 0) {
+			server_mode = true;
+			client_mode = false;
+		} else if (strcmp(s, "--client") == 0) {
+			client_mode = true;
+		} else if ((strcmp(s, "-S") == 0 || strcmp(s, "--socket") == 0) &&
+			   i + 1 < argc) {
+			socket_path = argv[++i];
+		} else if (strcmp(s, "-N") == 0 || strcmp(s, "--no-wait") == 0) {
+			no_wait = true;
 		} else if ((strcmp(s, "-c") == 0 || strcmp(s, "--config") == 0) &&
 			   i + 1 < argc) {
 			config_path = argv[++i];
@@ -1406,7 +2008,8 @@ int main(int argc, char **argv)
 			char *end;
 			pt = strtof(argv[++i], &end);
 			if (*end != '\0' || pt < 3 || pt > 200) {
-				fprintf(stderr, "tam-last: bad size: %s\n", argv[i]);
+				fprintf(stderr, "tam-last: bad size: %s\n",
+					argv[i]);
 				return 2;
 			}
 			pt_set = true;
@@ -1417,14 +2020,16 @@ int main(int argc, char **argv)
 			term_name = argv[++i];
 		} else if (strcmp(s, "--osc52") == 0 && i + 1 < argc) {
 			if (tl_osc52_policy_parse(argv[++i], &osc52_cli) != 0) {
-				fprintf(stderr, "tam-last: bad osc52 policy: %s\n",
+				fprintf(stderr,
+					"tam-last: bad osc52 policy: %s\n",
 					argv[i]);
 				return 2;
 			}
 			osc52_set = true;
 		} else if (strcmp(s, "--notify") == 0 && i + 1 < argc) {
 			if (tl_notify_policy_parse(argv[++i], &notify_cli) != 0) {
-				fprintf(stderr, "tam-last: bad notify policy: %s\n",
+				fprintf(stderr,
+					"tam-last: bad notify policy: %s\n",
 					argv[i]);
 				return 2;
 			}
@@ -1444,83 +2049,69 @@ int main(int argc, char **argv)
 		}
 	}
 
+	if (server_mode && client_mode) {
+		fprintf(stderr,
+			"tam-last: --server and --client cannot be combined\n");
+		return 2;
+	}
 	if (layout_name != NULL && strcmp(layout_name, "list") == 0) {
 		list_layouts(stdout);
 		return 0;
 	}
 
+	char cwd_buf[4096];
+	cwd_buf[0] = '\0';
+	(void)getcwd(cwd_buf, sizeof(cwd_buf));
+
+	struct tl_ipc_launch req;
+	memset(&req, 0, sizeof(req));
+	if (pt_set) {
+		req.flags |= TL_IPC_F_PT_SET;
+		req.pt = pt;
+	}
+	if (osc52_set) {
+		req.flags |= TL_IPC_F_OSC52_SET;
+		req.osc52 = (uint8_t)osc52_cli;
+	}
+	if (notify_set) {
+		req.flags |= TL_IPC_F_NOTIFY_SET;
+		req.notify = (uint8_t)notify_cli;
+	}
+	if (keys_mode)
+		req.flags |= TL_IPC_F_KEYS_MODE;
+	if (no_wait)
+		req.flags |= TL_IPC_F_NO_WAIT;
+	req.cwd = cwd_buf[0] != '\0' ? cwd_buf : NULL;
+	req.shell = getenv("SHELL");
+	req.config_path = (char *)config_path;
+	req.font_path = (char *)font_path;
+	req.layout_name = (char *)layout_name;
+	req.term_name = (char *)term_name;
+	req.argv = cmd;
+	req.argc = cmd_argc;
+
+	if (client_mode) {
+		signal(SIGPIPE, SIG_IGN);
+		char sock[256];
+		char err[256];
+		if (socket_path != NULL && socket_path[0] != '\0') {
+			snprintf(sock, sizeof(sock), "%s", socket_path);
+		} else if (tl_ipc_default_socket(sock, sizeof(sock), err,
+			   sizeof(err)) != 0) {
+			fprintf(stderr, "tam-last: %s\n", err);
+			return 1;
+		}
+		return tl_ipc_run_client(sock, &req);
+	}
+
 	setup_locale();
-	static struct app a;
-	a.paste_fd = -1;
-	a.osc52_fd = -1;
-	a.preedit_y0 = a.preedit_y1 = -1;
-	a.keys_mode = keys_mode;
-	if (a.keys_mode) {
-		a.keys_bar_rows = TL_KEYS_BAR_ROWS;
-		snprintf(a.keys_lines[0], sizeof(a.keys_lines[0]),
-			"keys: press any key (last %d events here; full log on stderr)",
-			TL_KEYS_BAR_ROWS);
-		a.keys_count = 1;
-		a.buf_bar_dirty[0] = a.buf_bar_dirty[1] = true;
-	}
-	char err[300];
-	tl_config_default(&a.cfg);
-	if (config_path != NULL) {
-		if (tl_config_load_file(&a.cfg, config_path) != 0)
-			fprintf(stderr, "tam-last: cannot read config %s\n",
-				config_path);
-	} else {
-		char def_cfg[512];
-		tl_config_default_path(def_cfg, sizeof(def_cfg));
-		if (def_cfg[0] != '\0')
-			(void)tl_config_load_file(&a.cfg, def_cfg);
-	}
-	a.pad_logical = a.cfg.pad;
-	const char *want_layout = layout_name != NULL ? layout_name : a.cfg.layout;
-	a.key_layout = tl_layout_find(want_layout);
-	if (a.key_layout == NULL) {
-		fprintf(stderr, "tam-last: unknown layout: %s\navailable layouts:\n",
-			want_layout);
-		list_layouts(stderr);
-		return 2;
-	}
-	tl_kbd_init(&a.kbd);
-	tl_kbd_set_layout(&a.kbd, a.key_layout);
-	tl_compose_init(&a.compose);
-
-	const char *want_font = font_path != NULL ? font_path :
-		(a.cfg.font[0] != '\0' ? a.cfg.font : NULL);
-	a.font_path = tl_font_find(want_font);
-	a.pt = pt_set ? pt : a.cfg.size;
-	a.scale120 = 120; /* until the compositor says otherwise */
-	if (a.font_path == NULL) {
-		fprintf(stderr, "tam-last: no font found; use --font FILE\n");
-		return 1;
-	}
-	if (open_font(&a, &a.font, err, sizeof(err)) != 0) {
-		fprintf(stderr, "tam-last: %s\n", err);
-		return 1;
-	}
-	if (tl_term_init(&a.term, DEFAULT_COLS, DEFAULT_ROWS) != 0) {
-		fprintf(stderr, "tam-last: out of memory\n");
-		return 1;
-	}
-	tl_term_set_palette(&a.term, &a.cfg.pal);
-	tl_term_set_osc52_policy(&a.term, osc52_set ? osc52_cli : a.cfg.osc52);
-	tl_actions_init(&a.actions);
-	a.notify_policy = notify_set ? notify_cli : a.cfg.notify;
-	a.pad = a.pad_logical;
-	int init_rows = DEFAULT_ROWS + (a.keys_mode ? TL_KEYS_BAR_ROWS : 0);
-	a.width = a.lw = DEFAULT_COLS * a.font.cell_w + 2 * a.pad_logical;
-	a.height = a.lh = init_rows * a.font.cell_h + 2 * a.pad_logical;
-
-	if (pipe(sigchld_pipe) != 0) {
+	if (pipe(sig_pipe) != 0) {
 		perror("tam-last: pipe");
 		return 1;
 	}
 	for (int i = 0; i < 2; i++) {
-		fcntl(sigchld_pipe[i], F_SETFD, FD_CLOEXEC);
-		fcntl(sigchld_pipe[i], F_SETFL, O_NONBLOCK);
+		fcntl(sig_pipe[i], F_SETFD, FD_CLOEXEC);
+		fcntl(sig_pipe[i], F_SETFL, O_NONBLOCK);
 	}
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
@@ -1529,146 +2120,50 @@ int main(int argc, char **argv)
 	sigaction(SIGCHLD, &sa, NULL);
 	signal(SIGPIPE, SIG_IGN);
 
-	/* The program starts first, so its first output is ready to draw. */
-	const char *want_term = term_name != NULL ? term_name :
-		(a.cfg.term[0] != '\0' ? a.cfg.term : NULL);
-	if (tl_pty_spawn(&a.pty, cmd, want_term, a.term.cols, a.term.rows,
-		    a.width, a.height, err, sizeof(err)) != 0) {
-		fprintf(stderr, "tam-last: %s\n", err);
+	static struct tl_server srv;
+	memset(&srv, 0, sizeof(srv));
+	srv.listen_fd = -1;
+	for (size_t i = 0; i < TL_SERVER_MAX_PENDING; i++)
+		srv.pending[i].fd = -1;
+	tl_font_cache_init(&srv.fonts);
+	tl_actions_init(&srv.actions);
+
+	if (tl_display_open(&srv.dpy) != 0) {
+		fprintf(stderr, "tam-last: %s\n", srv.dpy.err);
 		return 1;
 	}
-	if (tl_window_open(&a.win, "tam-last", "tam-last", &events, &a) != 0) {
-		fprintf(stderr, "tam-last: %s\n", a.win.err);
-		kill(-a.pty.pid, SIGHUP);
-		return 1;
-	}
 
-	int status = 0;
-	bool pty_open = true, child_done = false;
-	while (!a.closing) {
-		handle_term_osc(&a);
-		update_sync_timer(&a);
-		if (a.term.reply_len > 0) {
-			(void)tl_pty_queue(&a.pty, a.term.reply, a.term.reply_len);
-			a.term.reply_len = 0;
+	char err[300];
+	if (server_mode) {
+		if (socket_path != NULL && socket_path[0] != '\0') {
+			snprintf(srv.socket_path, sizeof(srv.socket_path),
+				"%s", socket_path);
+		} else if (tl_ipc_default_socket(srv.socket_path,
+			   sizeof(srv.socket_path), err, sizeof(err)) != 0) {
+			fprintf(stderr, "tam-last: %s\n", err);
+			tl_display_close(&srv.dpy);
+			return 1;
 		}
-		update_cursor_shape(&a);
-		if ((a.term.dirty || a.need_draw) && !a.term.sync_output)
-			draw(&a, false);
-
-		int pty_more = pty_open ? tl_pty_flush(&a.pty) : 0;
-		int wl_more = tl_window_flush(&a.win);
-		if (wl_more < 0 || pty_more < 0) {
-			if (wl_more < 0)
-				fprintf(stderr, "tam-last: %s\n", a.win.err);
-			break;
+		srv.listen_fd = tl_ipc_listen(srv.socket_path, err,
+			sizeof(err));
+		if (srv.listen_fd < 0) {
+			fprintf(stderr, "tam-last: %s\n", err);
+			tl_display_close(&srv.dpy);
+			return 1;
 		}
-
-		struct pollfd fds[5] = {
-			{ tl_window_fd(&a.win), POLLIN | (wl_more ? POLLOUT : 0), 0 },
-			{ pty_open ? a.pty.master : -1,
-			  POLLIN | (pty_more ? POLLOUT : 0), 0 },
-			{ sigchld_pipe[0], POLLIN, 0 },
-			{ a.paste_fd, POLLIN, 0 },
-			{ a.osc52_fd, POLLIN, 0 },
-		};
-		int timeout = -1;
-		if (a.repeat_code != 0 && a.focused)
-			timeout = (int)ms_until(&a.repeat_at);
-		if (a.term.sync_output && a.sync_armed) {
-			int sm = (int)ms_until(&a.sync_deadline);
-			if (timeout < 0 || sm < timeout)
-				timeout = sm;
-		}
-		int am = tl_action_next_timeout_ms(&a.actions);
-		if (am >= 0 && (timeout < 0 || am < timeout))
-			timeout = am;
-
-		if (poll(fds, 5, timeout) < 0 && errno != EINTR) {
-			perror("tam-last: poll");
-			break;
-		}
-
-		if (fds[0].revents & POLLIN) {
-			if (tl_window_dispatch(&a.win) != 0) {
-				fprintf(stderr, "tam-last: %s\n", a.win.err);
-				break;
-			}
-		} else if (fds[0].revents & (POLLERR | POLLHUP)) {
-			fprintf(stderr, "tam-last: the compositor went away\n");
-			break;
-		}
-
-		if (pty_open && (fds[1].revents & (POLLIN | POLLHUP | POLLERR))) {
-			pty_open = read_pty(&a);
-			update_sync_timer(&a);
-		}
-
-		if (fds[2].revents & POLLIN) {
-			char drain[64];
-			while (read(sigchld_pipe[0], drain, sizeof(drain)) > 0)
-				;
-			if (!child_done)
-				child_done = reap(&a, &status);
-			tl_action_reap(&a.actions);
-		}
-
-		if (a.paste_fd >= 0 &&
-		    (fds[3].revents & (POLLIN | POLLHUP | POLLERR)))
-			drain_paste(&a);
-
-		if (a.osc52_fd >= 0 &&
-		    (fds[4].revents & (POLLIN | POLLHUP | POLLERR)))
-			drain_osc52_read(&a);
-
-		if (a.repeat_code != 0 && a.focused &&
-		    ms_until(&a.repeat_at) == 0) {
-			send_key(&a, a.repeat_code, TL_KEY_REPEAT);
-			ts_add_ms(&a.repeat_at, 1000 / a.repeat_rate);
-		}
-
-		if (a.term.sync_output && a.sync_armed &&
-		    ms_until(&a.sync_deadline) == 0) {
-			a.term.sync_output = false;
-			a.sync_armed = false;
-		}
-		(void)tl_action_check_deadlines(&a.actions);
-
-		/* Done when the program has exited, or nothing can write to
-		 * the terminal any more. */
-		if (child_done || !pty_open) {
-			if (pty_open)
-				pty_open = read_pty(&a); /* its last words */
-			if (!child_done)
-				child_done = reap(&a, &status);
-			if (!child_done) {
-				struct pollfd sp = { sigchld_pipe[0], POLLIN, 0 };
-				if (poll(&sp, 1, 50) > 0)
-					child_done = reap(&a, &status);
-			}
-			if (a.term.dirty)
-				draw(&a, true);
-			(void)tl_window_flush(&a.win);
-			break;
+		struct sigaction st;
+		memset(&st, 0, sizeof(st));
+		st.sa_handler = on_sigterm;
+		sigaction(SIGINT, &st, NULL);
+		sigaction(SIGTERM, &st, NULL);
+	} else {
+		if (session_create(&srv, &req, -1, err, sizeof(err)) != 0) {
+			fprintf(stderr, "tam-last: %s\n", err);
+			tl_display_close(&srv.dpy);
+			tl_font_cache_free(&srv.fonts);
+			return 1;
 		}
 	}
 
-	if (!child_done)
-		kill(-a.pty.pid, SIGHUP);
-	tl_actions_kill_all(&a.actions);
-	tl_search_free(&a.search);
-	tl_url_end(&a.urls);
-	if (a.paste_fd >= 0)
-		close(a.paste_fd);
-	if (a.osc52_fd >= 0)
-		close(a.osc52_fd);
-	free(a.osc52_buf);
-	free(a.preedit_text);
-	free(a.buf_dirty[0]);
-	free(a.buf_dirty[1]);
-	tl_window_close(&a.win);
-	tl_pty_close(&a.pty);
-	tl_term_free(&a.term);
-	tl_font_close(&a.font);
-	return status;
+	return run_server_loop(&srv);
 }

@@ -28,8 +28,11 @@ static void set_size(int fd, int cols, int rows, int width, int height)
 }
 
 /* In the child, between fork and exec. tam-last has one thread, so the
- * child may call ordinary library functions such as execvp. */
-static void child(const char *slave, char *const argv[], const char *shell)
+ * child may call ordinary library functions such as execvp and setenv. */
+static void setup_term_env(const char *term_name);
+
+static void child(const char *slave, char *const argv[], const char *shell,
+	const char *term_name, const char *cwd)
 {
 	sigset_t none;
 	sigemptyset(&none);
@@ -52,6 +55,13 @@ static void child(const char *slave, char *const argv[], const char *shell)
 		_exit(126);
 	if (fd > 2)
 		close(fd);
+	if (cwd != NULL && cwd[0] != '\0')
+		(void)chdir(cwd);
+	setup_term_env(term_name);
+	setenv("COLORTERM", "truecolor", 1);
+	setenv("TERM_PROGRAM", "tam-last", 1);
+	unsetenv("COLUMNS");
+	unsetenv("LINES");
 	if (argv != NULL)
 		execvp(argv[0], argv);
 	else
@@ -142,8 +152,9 @@ static void setup_term_env(const char *term_name)
 	setenv("TERM", "xterm-256color", 1);
 }
 
-int tl_pty_spawn(struct tl_pty *p, char *const argv[], const char *term_name,
-	int cols, int rows, int width, int height, char *err, size_t errlen)
+int tl_pty_spawn_in(struct tl_pty *p, char *const argv[], const char *term_name,
+	const char *cwd, const char *shell_override, int cols, int rows,
+	int width, int height, char *err, size_t errlen)
 {
 	memset(p, 0, sizeof(*p));
 	p->master = -1;
@@ -167,16 +178,16 @@ int tl_pty_spawn(struct tl_pty *p, char *const argv[], const char *term_name,
 	set_size(m, cols, rows, width, height);
 	fcntl(m, F_SETFD, FD_CLOEXEC);
 
-	const char *shell = getenv("SHELL");
-	if (shell == NULL || shell[0] != '/')
+	const char *shell = NULL;
+	if (shell_override != NULL && shell_override[0] == '/')
+		shell = shell_override;
+	if (shell == NULL) {
+		const char *env_shell = getenv("SHELL");
+		if (env_shell != NULL && env_shell[0] == '/')
+			shell = env_shell;
+	}
+	if (shell == NULL)
 		shell = "/bin/sh";
-
-	/* Set before fork, so the child calls nothing unsafe. */
-	setup_term_env(term_name);
-	setenv("COLORTERM", "truecolor", 1);
-	setenv("TERM_PROGRAM", "tam-last", 1);
-	unsetenv("COLUMNS");
-	unsetenv("LINES");
 
 	pid_t pid = fork();
 	if (pid < 0) {
@@ -185,12 +196,19 @@ int tl_pty_spawn(struct tl_pty *p, char *const argv[], const char *term_name,
 		return -1;
 	}
 	if (pid == 0)
-		child(slave, argv, shell);
+		child(slave, argv, shell, term_name, cwd);
 
 	fcntl(m, F_SETFL, fcntl(m, F_GETFL) | O_NONBLOCK);
 	p->master = m;
 	p->pid = pid;
 	return 0;
+}
+
+int tl_pty_spawn(struct tl_pty *p, char *const argv[], const char *term_name,
+	int cols, int rows, int width, int height, char *err, size_t errlen)
+{
+	return tl_pty_spawn_in(p, argv, term_name, NULL, NULL, cols, rows,
+		width, height, err, errlen);
 }
 
 void tl_pty_resize(struct tl_pty *p, int cols, int rows, int width,

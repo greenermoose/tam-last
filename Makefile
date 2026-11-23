@@ -43,13 +43,13 @@ COMPOSE_SRC = layouts/compose
 CORE_SRCS = src/wl/conn.c src/wl/proto.c src/window.c src/shm.c \
 	src/font/ttf.c src/font/raster.c src/font/box.c src/font/font.c \
 	src/config.c src/vt.c src/osc.c src/term.c src/select.c src/search.c \
-	src/url.c src/action.c src/render.c \
+	src/url.c src/action.c src/ipc.c src/render.c \
 	src/keys/keymap.c src/keys/compose.c src/keys/encode.c \
 	src/keys/trace.c src/pty.c
 CORE_OBJS = $(patsubst src/%.c,$(B)/%.o,$(CORE_SRCS)) $(B)/keys/layouts_gen.o
 TESTS = $(B)/tests/test_wire $(B)/tests/test_vt $(B)/tests/test_ttf \
 	$(B)/tests/test_keys $(B)/tests/test_render $(B)/tests/test_config \
-	$(B)/tests/test_modes
+	$(B)/tests/test_modes $(B)/tests/test_ipc
 
 all: $(B)/tam-last $(B)/terminfo/t/tam-last
 
@@ -100,11 +100,13 @@ sanitize:
 
 install: $(B)/tam-last
 	install -Dm755 $(B)/tam-last $(DESTDIR)$(BINDIR)/tam-last
+	ln -sf tam-last $(DESTDIR)$(BINDIR)/tam-last-client
 	mkdir -p $(DESTDIR)$(TERMINFODIR)
 	$(TIC) -x -o $(DESTDIR)$(TERMINFODIR) terminfo/tam-last.ti
 
 uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/tam-last \
+		$(DESTDIR)$(BINDIR)/tam-last-client \
 		$(DESTDIR)$(TERMINFODIR)/t/tam-last \
 		$(DESTDIR)$(TERMINFODIR)/t/tam-last-direct
 

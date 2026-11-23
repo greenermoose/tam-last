@@ -1,0 +1,68 @@
+W16 SERVER MODE (0.2.3)
+
+Date: 2026-11-23
+AI harness: agy
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice for tam-last"
+  Fred: "1 both / 2 fail with a clear error / Plan approved. Proceed."
+  Fred: "Pass. Commit and finish."
+
+
+DONE
+
+  - Added per-window Wayland destructor requests (tl_xdg_surface_destroy,
+    tl_toplevel_destroy, tl_viewport_destroy, tl_fractional_destroy) in
+    include/tam-last/proto.h and src/wl/proto.c.
+  - Split include/tam-last/window.h and src/window.c into shared
+    tl_display (one Wayland wire, globals, seat keyboard/pointer/IME
+    focus routing, clipboard/primary selection, repeat info) and
+    per-window tl_window (surfaces, toplevels, viewports, fractional
+    scale, SHM buffers, clean per-window destruction).
+  - Added reference-counted shared font cache (tl_font_cache) in
+    include/tam-last/font.h and src/font/font.c with warm LRU retention
+    so multiple windows share mapped fonts and rasterized glyph masks.
+  - Added tl_pty_spawn_in in include/tam-last/pty.h and src/pty.c so
+    per-window cwd, SHELL, and $TERM are set in the child without
+    mutating the server process.
+  - Added client/server Unix-socket IPC in include/tam-last/ipc.h and
+    src/ipc.c (owner-only 0600 socket at
+    $XDG_RUNTIME_DIR/tam-last-<WAYLAND_DISPLAY>.sock or -S/--socket,
+    stale-socket cleanup, duplicate-server detection, length-prefixed
+    bounds-checked launch/ack/exit framing, -N/--no-wait, clear error
+    when no server is running).
+  - Refactored src/main.c into a unified multi-window poll() loop
+    supporting standalone, --server, --client, and argv[0]
+    tam-last-client invocation, with clean SIGINT/SIGTERM socket cleanup.
+  - Updated Makefile to build src/ipc.c, run tests/test_ipc, and
+    install/uninstall the tam-last-client symlink.
+  - Expanded tests/test_wire.c (192 checks: destroy opcodes and
+    multi-window routing), added tests/test_ipc.c (72 checks: socket
+    paths, codec roundtrip, malformed packets, live handshake, font
+    cache), and expanded tests/headless.sh to test multi-window
+    --server/--client, cwd forwarding, exit status, and clean shutdown
+    under headless tam-pane.
+  - Added interactive sandbox/demo-server (option d in sandbox/play,
+    documented in sandbox/README-sandbox).
+  - Bumped VERSION to 0.2.3 and updated plans/P3-daily-parity.md.
+  - Verified make test, make sanitize (ASan/UBSan + headless tam-pane),
+    readelf -d (libc and libm only), sh -n, and staged install/uninstall
+    with zero warnings.
+  - Fred tested and accepted tam-last 0.2.3 on 2026-11-23.
+
+
+FAILED
+
+  - None.
+
+
+HANDOFF
+
+  - Fred accepted 0.2.3 (server mode: one process, many windows, shared
+    Wayland connection, shared font cache, instant start) on 2026-11-23,
+    completing Phase P3.
+  - Next milestone is Phase P4, 0.3.0 (dogfood / packaging in
+    tamlinux-packages; see plans/P4-dogfood.md).

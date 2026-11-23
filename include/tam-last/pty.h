@@ -14,10 +14,15 @@ struct tl_pty {
 	size_t out_len, out_cap;
 };
 
-/* Start argv (NULL: $SHELL, else /bin/sh) on a new pty of the given size.
+/* Start argv (NULL: shell_override, else $SHELL, else /bin/sh) on a new pty
+ * of the given size, optionally chdir'ing into cwd in the child.
  * term_name overrides $TERM when non-NULL and non-empty; otherwise tam-last
  * is used when its terminfo entry is installed, falling back to xterm-256color.
+ * Never mutates the parent process's environment or cwd.
  * Returns 0, or -1 with a message in err. */
+int tl_pty_spawn_in(struct tl_pty *p, char *const argv[], const char *term_name,
+	const char *cwd, const char *shell_override, int cols, int rows,
+	int width, int height, char *err, size_t errlen);
 int tl_pty_spawn(struct tl_pty *p, char *const argv[], const char *term_name,
 	int cols, int rows, int width, int height, char *err, size_t errlen);
 void tl_pty_resize(struct tl_pty *p, int cols, int rows, int width,
