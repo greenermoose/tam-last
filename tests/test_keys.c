@@ -17,7 +17,7 @@
 #endif
 #endif
 
-static const struct tl_key_modes plain = { false, false, false, false, 0 };
+static const struct tl_key_modes plain = { false, false, false, false, 0, NULL };
 
 static int sends_ev(uint32_t code, unsigned mods, enum tl_key_event ev,
 	const struct tl_key_modes *m, const char *want, size_t want_len)
@@ -178,9 +178,9 @@ int main(void)
 	CHECK(tl_keymap_us(TL_KEY_F1, false, false) == 0);
 
 	/* The bytes. */
-	struct tl_key_modes app = { true, false, false, false, 0 };
-	struct tl_key_modes num = { false, false, true, false, 0 };
-	struct tl_key_modes caps = { false, false, false, true, 0 };
+	struct tl_key_modes app = { true, false, false, false, 0, NULL };
+	struct tl_key_modes num = { false, false, true, false, 0, NULL };
+	struct tl_key_modes caps = { false, false, false, true, 0, NULL };
 	SENDS(TL_KEY_A, 0, &plain, "a");
 	SENDS(TL_KEY_A, TL_MOD_SHIFT, &plain, "A");
 	SENDS(TL_KEY_A, 0, &caps, "A");
@@ -247,7 +247,7 @@ int main(void)
 
 	/* Kitty keyboard protocol (0.1.0): flag 1 (disambiguate). */
 	struct tl_key_modes k_dis = { false, false, false, false,
-		TL_KITTY_DISAMBIGUATE };
+		TL_KITTY_DISAMBIGUATE, NULL };
 	SENDS(TL_KEY_H, TL_MOD_CTRL, &k_dis, "\033[104;5u");
 	SENDS(TL_KEY_I, TL_MOD_CTRL, &k_dis, "\033[105;5u");
 	SENDS(TL_KEY_M, TL_MOD_CTRL, &k_dis, "\033[109;5u");
@@ -267,7 +267,7 @@ int main(void)
 	SENDS(TL_KEY_BACKSPACE, 0, &k_dis, "\177");
 	/* F1-F4 and cursor keys under disambiguate (F3 avoids CPR collision). */
 	struct tl_key_modes k_dis_app = { true, false, false, false,
-		TL_KITTY_DISAMBIGUATE };
+		TL_KITTY_DISAMBIGUATE, NULL };
 	SENDS(TL_KEY_UP, 0, &k_dis_app, "\033[A");
 	SENDS(TL_KEY_F1, 0, &k_dis, "\033[P");
 	SENDS(TL_KEY_F2, 0, &k_dis, "\033[Q");
@@ -276,7 +276,7 @@ int main(void)
 	SENDS(TL_KEY_F4, 0, &k_dis, "\033[S");
 	/* Keypad keys get distinct PUA codes under disambiguate. */
 	struct tl_key_modes k_dis_num = { false, false, true, false,
-		TL_KITTY_DISAMBIGUATE };
+		TL_KITTY_DISAMBIGUATE, NULL };
 	SENDS(TL_KEY_KP5, 0, &k_dis_num, "\033[57404;129u");
 	SENDS(TL_KEY_KP8, 0, &k_dis, "\033[57419u");
 	SENDS(TL_KEY_KPENTER, 0, &k_dis, "\033[57414u");
@@ -301,7 +301,7 @@ int main(void)
 
 	/* Flag 2: event types (press, repeat, release). */
 	struct tl_key_modes k_ev = { false, false, false, false,
-		TL_KITTY_DISAMBIGUATE | TL_KITTY_EVENTS };
+		TL_KITTY_DISAMBIGUATE | TL_KITTY_EVENTS, NULL };
 	SENDS_EV(TL_KEY_A, TL_MOD_CTRL, TL_KEY_REPEAT, &k_ev, "\033[97;5:2u");
 	SENDS_EV(TL_KEY_A, TL_MOD_CTRL, TL_KEY_RELEASE, &k_ev, "\033[97;5:3u");
 	SENDS_EV(TL_KEY_UP, 0, TL_KEY_RELEASE, &k_ev, "\033[1;1:3A");
@@ -313,7 +313,7 @@ int main(void)
 
 	/* Flag 4: alternate (shifted) keys. */
 	struct tl_key_modes k_alt = { false, false, false, false,
-		TL_KITTY_DISAMBIGUATE | TL_KITTY_ALTERNATE };
+		TL_KITTY_DISAMBIGUATE | TL_KITTY_ALTERNATE, NULL };
 	SENDS(TL_KEY_A, TL_MOD_CTRL | TL_MOD_SHIFT, &k_alt, "\033[97:65;6u");
 	SENDS(TL_KEY_1, TL_MOD_CTRL | TL_MOD_SHIFT, &k_alt, "\033[49:33;6u");
 	SENDS(TL_KEY_A, TL_MOD_CTRL, &k_alt, "\033[97;5u");
@@ -321,7 +321,7 @@ int main(void)
 
 	/* Flag 8: all keys as escape codes (text, Enter/Tab/BS, modifiers). */
 	struct tl_key_modes k_all = { false, false, false, false,
-		TL_KITTY_ALL_KEYS | TL_KITTY_EVENTS };
+		TL_KITTY_ALL_KEYS | TL_KITTY_EVENTS, NULL };
 	SENDS_EV(TL_KEY_A, 0, TL_KEY_PRESS, &k_all, "\033[97u");
 	SENDS_EV(TL_KEY_A, 0, TL_KEY_RELEASE, &k_all, "\033[97;1:3u");
 	SENDS_EV(TL_KEY_A, TL_MOD_SHIFT, TL_KEY_PRESS, &k_all, "\033[97;2u");
@@ -336,11 +336,11 @@ int main(void)
 
 	/* Flag 16: associated text (with all 5 flags active). */
 	struct tl_key_modes k_full = { false, false, false, false,
-		TL_KITTY_MASK };
+		TL_KITTY_MASK, NULL };
 	struct tl_key_modes k_full_caps = { false, false, false, true,
-		TL_KITTY_MASK };
+		TL_KITTY_MASK, NULL };
 	struct tl_key_modes k_full_num = { false, false, true, false,
-		TL_KITTY_MASK };
+		TL_KITTY_MASK, NULL };
 	SENDS_EV(TL_KEY_A, 0, TL_KEY_PRESS, &k_full, "\033[97;;97u");
 	SENDS_EV(TL_KEY_A, TL_MOD_SHIFT, TL_KEY_PRESS, &k_full,
 		"\033[97:65;2;65u");
@@ -404,7 +404,7 @@ int main(void)
 			"pty=(none) [copy]") == 0);
 
 		struct tl_key_modes both_locks = { false, false, true, true,
-			TL_KITTY_DISAMBIGUATE | TL_KITTY_EVENTS };
+			TL_KITTY_DISAMBIGUATE | TL_KITTY_EVENTS, NULL };
 		n = tl_key_encode_event(TL_KEY_A, TL_MOD_ALT, TL_KEY_RELEASE,
 			&both_locks, seq);
 		tl_key_trace_format(line, sizeof(line), TL_KEY_A, TL_MOD_ALT,
@@ -465,6 +465,173 @@ int main(void)
 			}
 			CHECK(pn == n && memcmp(parsed, seq, n) == 0);
 		}
+	}
+
+	/* Compiled-in layouts, AltGr, UTF-8, dead keys, and Compose (0.1.2). */
+	{
+		CHECK(tl_layout_count() == 7);
+		const struct tl_layout *l_us = tl_layout_find("us");
+		const struct tl_layout *l_intl = tl_layout_find("us-intl");
+		const struct tl_layout *l_dvorak = tl_layout_find("dvorak");
+		const struct tl_layout *l_colemak = tl_layout_find("colemak");
+		const struct tl_layout *l_uk = tl_layout_find("uk");
+		const struct tl_layout *l_de = tl_layout_find("de");
+		const struct tl_layout *l_fr = tl_layout_find("fr");
+		CHECK(l_us != NULL && l_us == tl_layout_default());
+		CHECK(l_intl != NULL && l_dvorak != NULL && l_colemak != NULL);
+		CHECK(l_uk != NULL && l_de != NULL && l_fr != NULL);
+		CHECK(tl_layout_find("nonexistent") == NULL);
+		CHECK(tl_layout_find("") == NULL);
+		CHECK(tl_layout_find(NULL) == NULL);
+
+		/* RightAlt is Alt on us/dvorak, AltGr on us-intl/colemak/uk/de/fr. */
+		struct tl_kbd ks;
+		tl_kbd_init(&ks);
+		tl_kbd_key(&ks, TL_KEY_RIGHTALT, true);
+		CHECK(tl_kbd_mods(&ks) == TL_MOD_ALT);
+		tl_kbd_set_layout(&ks, l_intl);
+		CHECK(tl_kbd_mods(&ks) == TL_MOD_ALTGR);
+		tl_kbd_key(&ks, TL_KEY_LEFTALT, true);
+		CHECK(tl_kbd_mods(&ks) == (TL_MOD_ALT | TL_MOD_ALTGR));
+		tl_kbd_set_layout(&ks, l_dvorak);
+		CHECK(tl_kbd_mods(&ks) == TL_MOD_ALT);
+		tl_kbd_leave(&ks);
+
+		/* Layout lookups across all 7 layouts (base, Shift, AltGr, Caps). */
+		/* us-intl */
+		CHECK(tl_layout_lookup(l_intl, TL_KEY_E, TL_MOD_ALTGR, false) == 0x00e9u); /* é */
+		CHECK(tl_layout_lookup(l_intl, TL_KEY_E, TL_MOD_ALTGR | TL_MOD_SHIFT, false) == 0x00c9u); /* É */
+		CHECK(tl_layout_lookup(l_intl, TL_KEY_E, TL_MOD_ALTGR, true) == 0x00c9u); /* CapsLock + AltGr */
+		CHECK(tl_layout_lookup(l_intl, TL_KEY_5, TL_MOD_ALTGR, false) == 0x20acu); /* € */
+		CHECK(tl_layout_lookup(l_intl, TL_KEY_APOSTROPHE, 0, false) ==
+			(TL_KEY_DEAD_BIT | TL_DEAD_ACUTE));
+		CHECK(tl_layout_lookup(l_intl, TL_KEY_APOSTROPHE, TL_MOD_SHIFT, false) ==
+			(TL_KEY_DEAD_BIT | TL_DEAD_DIAERESIS));
+		CHECK(strcmp(tl_dead_key_name(TL_KEY_DEAD_BIT | TL_DEAD_ACUTE),
+			"dead_acute") == 0);
+		CHECK(tl_dead_key_name('a') == NULL);
+
+		/* dvorak */
+		CHECK(tl_layout_lookup(l_dvorak, TL_KEY_S, 0, false) == 'o');
+		CHECK(tl_layout_lookup(l_dvorak, TL_KEY_D, TL_MOD_SHIFT, false) == 'E');
+		CHECK(tl_layout_lookup(l_dvorak, TL_KEY_Q, 0, false) == '\'');
+
+		/* colemak */
+		CHECK(tl_layout_lookup(l_colemak, TL_KEY_E, 0, false) == 'f');
+		CHECK(tl_layout_lookup(l_colemak, TL_KEY_K, 0, false) == 'e');
+		CHECK(tl_layout_lookup(l_colemak, TL_KEY_K, TL_MOD_ALTGR, false) == 0x00e9u); /* é */
+		CHECK(tl_layout_lookup(l_colemak, TL_KEY_MINUS, TL_MOD_ALTGR | TL_MOD_SHIFT, false) == 0x2014u); /* — */
+
+		/* uk */
+		CHECK(tl_layout_lookup(l_uk, TL_KEY_3, TL_MOD_SHIFT, false) == 0x00a3u); /* £ */
+		CHECK(tl_layout_lookup(l_uk, TL_KEY_2, TL_MOD_SHIFT, false) == '"');
+		CHECK(tl_layout_lookup(l_uk, TL_KEY_APOSTROPHE, TL_MOD_SHIFT, false) == '@');
+		CHECK(tl_layout_lookup(l_uk, TL_KEY_102ND, 0, false) == '\\');
+
+		/* de */
+		CHECK(tl_layout_lookup(l_de, TL_KEY_Y, 0, false) == 'z');
+		CHECK(tl_layout_lookup(l_de, TL_KEY_Z, 0, false) == 'y');
+		CHECK(tl_layout_lookup(l_de, TL_KEY_MINUS, 0, false) == 0x00dfu); /* ß */
+		CHECK(tl_layout_lookup(l_de, TL_KEY_APOSTROPHE, 0, false) == 0x00e4u); /* ä */
+		CHECK(tl_layout_lookup(l_de, TL_KEY_APOSTROPHE, 0, true) == 0x00c4u); /* Ä via Caps */
+		CHECK(tl_layout_lookup(l_de, TL_KEY_Q, TL_MOD_ALTGR, false) == '@');
+		CHECK(tl_layout_lookup(l_de, TL_KEY_102ND, TL_MOD_ALTGR, false) == '|');
+
+		/* fr */
+		CHECK(tl_layout_lookup(l_fr, TL_KEY_Q, 0, false) == 'a');
+		CHECK(tl_layout_lookup(l_fr, TL_KEY_W, 0, false) == 'z');
+		CHECK(tl_layout_lookup(l_fr, TL_KEY_2, 0, false) == 0x00e9u); /* é */
+		CHECK(tl_layout_lookup(l_fr, TL_KEY_2, 0, true) == 0x00e9u); /* Caps doesn't turn é into 2 */
+		CHECK(tl_layout_lookup(l_fr, TL_KEY_E, TL_MOD_ALTGR, false) == 0x20acu); /* € */
+
+		/* UTF-8 encoding in legacy and Kitty modes. */
+		struct tl_key_modes m_intl = { false, false, false, false, 0, l_intl };
+		struct tl_key_modes m_intl_kdis = { false, false, false, false,
+			TL_KITTY_DISAMBIGUATE, l_intl };
+		struct tl_key_modes m_intl_kfull = { false, false, false, false,
+			TL_KITTY_MASK, l_intl };
+		SENDS(TL_KEY_E, TL_MOD_ALTGR, &m_intl, "\xc3\xa9");          /* é */
+		SENDS(TL_KEY_5, TL_MOD_ALTGR, &m_intl, "\xe2\x82\xac");      /* € */
+		SENDS(TL_KEY_E, TL_MOD_ALTGR | TL_MOD_ALT, &m_intl, "\033\xc3\xa9");
+		SENDS(TL_KEY_APOSTROPHE, 0, &m_intl, "");                     /* dead key emits nothing directly */
+		SENDS(TL_KEY_E, TL_MOD_ALTGR, &m_intl_kdis, "\xc3\xa9");      /* plain UTF-8 under disambig */
+		SENDS_EV(TL_KEY_E, TL_MOD_ALTGR, TL_KEY_PRESS, &m_intl_kfull,
+			"\033[101;;233u");                                    /* CSI u with é text */
+
+		/* Dead-key state machine. */
+		struct tl_compose comp;
+		uint32_t out_cp = 0;
+		tl_compose_init(&comp);
+		CHECK(!tl_compose_active(&comp));
+		CHECK(tl_compose_feed(&comp, 'a', &out_cp) == TL_COMPOSE_IDLE);
+		CHECK(tl_compose_feed(&comp, TL_KEY_DEAD_BIT | TL_DEAD_ACUTE, &out_cp) ==
+			TL_COMPOSE_PENDING);
+		CHECK(tl_compose_active(&comp));
+		CHECK(tl_compose_feed(&comp, 'e', &out_cp) == TL_COMPOSE_DONE &&
+			out_cp == 0x00e9u); /* é */
+		CHECK(!tl_compose_active(&comp));
+		/* Dead key + space -> fallback ASCII; dead + dead -> spacing accent. */
+		CHECK(tl_compose_feed(&comp, TL_KEY_DEAD_BIT | TL_DEAD_ACUTE, &out_cp) ==
+			TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, ' ', &out_cp) == TL_COMPOSE_DONE &&
+			out_cp == '\'');
+		CHECK(tl_compose_feed(&comp, TL_KEY_DEAD_BIT | TL_DEAD_ACUTE, &out_cp) ==
+			TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, TL_KEY_DEAD_BIT | TL_DEAD_ACUTE, &out_cp) ==
+			TL_COMPOSE_DONE && out_cp == 0x00b4u); /* ´ */
+		/* Dead tilde + n -> ñ; dead diaeresis + U -> Ü; mismatch cancels. */
+		CHECK(tl_compose_feed(&comp, TL_KEY_DEAD_BIT | TL_DEAD_TILDE, &out_cp) ==
+			TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, 'n', &out_cp) == TL_COMPOSE_DONE &&
+			out_cp == 0x00f1u); /* ñ */
+		CHECK(tl_compose_feed(&comp, TL_KEY_DEAD_BIT | TL_DEAD_DIAERESIS, &out_cp) ==
+			TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, 'U', &out_cp) == TL_COMPOSE_DONE &&
+			out_cp == 0x00dcu); /* Ü */
+		CHECK(tl_compose_feed(&comp, TL_KEY_DEAD_BIT | TL_DEAD_ACUTE, &out_cp) ==
+			TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, 'x', &out_cp) == TL_COMPOSE_CANCELLED);
+		CHECK(!tl_compose_active(&comp));
+
+		/* Multi-key Compose sequences (2-key and 3-key). */
+		CHECK(tl_compose_feed(&comp, TL_COMPOSE_START, &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, 'c', &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, '=', &out_cp) == TL_COMPOSE_DONE &&
+			out_cp == 0x20acu); /* € */
+		CHECK(tl_compose_feed(&comp, TL_COMPOSE_START, &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, '-', &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, '-', &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, '-', &out_cp) == TL_COMPOSE_DONE &&
+			out_cp == 0x2014u); /* — */
+		CHECK(tl_compose_feed(&comp, TL_COMPOSE_START, &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, '(', &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, 'c', &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, ')', &out_cp) == TL_COMPOSE_DONE &&
+			out_cp == 0x00a9u); /* © */
+		/* Compose mismatch cancels cleanly. */
+		CHECK(tl_compose_feed(&comp, TL_COMPOSE_START, &out_cp) == TL_COMPOSE_PENDING);
+		CHECK(tl_compose_feed(&comp, 'q', &out_cp) == TL_COMPOSE_CANCELLED);
+		CHECK(!tl_compose_active(&comp));
+
+		/* tl_key_encode_text encodes composed codepoints as UTF-8. */
+		char seq[TL_KEY_SEQ_MAX];
+		CHECK(tl_key_encode_text(0x2014u, seq) == 3 &&
+			memcmp(seq, "\xe2\x80\x94", 3) == 0);
+
+		/* --keys trace shows AltGr and dead keys cleanly. */
+		char line[256];
+		size_t n = tl_key_encode_event(TL_KEY_E, TL_MOD_ALTGR,
+			TL_KEY_PRESS, &m_intl, seq);
+		tl_key_trace_format(line, sizeof(line), TL_KEY_E, TL_MOD_ALTGR,
+			TL_KEY_PRESS, &m_intl, seq, n, NULL);
+		CHECK(strstr(line, "mods=AltGr") != NULL);
+		CHECK(strstr(line, "char=U+00E9") != NULL);
+		CHECK(strstr(line, "[c3 a9]") != NULL);
+
+		tl_key_trace_format(line, sizeof(line), TL_KEY_APOSTROPHE, 0,
+			TL_KEY_PRESS, &m_intl, NULL, 0, "dead_acute");
+		CHECK(strstr(line, "char=dead_acute") != NULL);
+		CHECK(strstr(line, "[dead_acute]") != NULL);
 	}
 
 	CHECK_DONE("test_keys");

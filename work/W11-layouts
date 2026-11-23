@@ -1,0 +1,68 @@
+W11 COMPILED LAYOUTS, ALTGR, DEAD KEYS, AND COMPOSE (0.1.2)
+
+Date: 2026-11-23
+AI harness: agy
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice for tam-last"
+  Fred: Keep layout sources, compiler, and tables in tam-last for 0.1.2
+        (structured to lift into libtam later when tam-pane reaches P6);
+        include all 7 layouts: us, us-intl, dvorak, colemak, uk, de, fr.
+  Fred: "Approved. Proceed."
+  Fred: "pass. Commit and finish"
+
+
+DONE
+
+  - Added compact layout and compose source files under layouts/
+    (documented in layouts/README-layouts):
+    - layouts/us.layout, layouts/us-intl.layout, layouts/dvorak.layout,
+      layouts/colemak.layout, layouts/uk.layout, layouts/de.layout,
+      layouts/fr.layout.
+    - layouts/compose unifying dead-key sequences (dead_acute,
+      dead_grave, dead_circumflex, dead_tilde, dead_diaeresis,
+      dead_cedilla, dead_ring) and multi-key Compose (KEY_COMPOSE)
+      sequences.
+  - Added pure C11 build-time compiler tools/gen-layouts.c (zero
+    external dependencies; validates evdev names, UTF-8 tokens, U+XXXX
+    ranges, and compose prefix conflicts) and wired build/layouts_gen.c
+    generation into Makefile.
+  - Updated include/tam-last/keys.h and src/keys/:
+    - keymap.c: replaced hardcoded US array with generated tl_layouts[],
+      added TL_MOD_ALTGR, 4-level tl_layout_lookup() with Unicode-aware
+      Caps Lock on letter pairs, and layout-aware RightAlt.
+    - compose.c: pure prefix-matching dead-key and Compose state
+      machine (tl_compose_feed).
+    - encode.c: added tl_utf8_encode() and tl_key_encode_text(); updated
+      legacy and Kitty encoding for multi-byte UTF-8 and layout lookup.
+    - trace.c: displays AltGr in mods= and dead_* names in char=.
+  - Added layout = <name> in [main] (include/tam-last/config.h,
+    src/config.c) and -l/--layout NAME (plus --layout list) in
+    src/main.c; integrated Compose/dead-key handling with Esc cancel
+    and focus-out reset.
+  - Expanded tests/test_keys.c (262 checks) and tests/test_config.c
+    (41 checks).
+  - Added interactive sandbox/demo-layouts (option 9 in sandbox/play
+    and documented in sandbox/README-sandbox).
+  - Bumped VERSION to 0.1.2 and updated plans/P2-key-path.md.
+  - Verified make clean && make (zero warnings), make test, make
+    sanitize (ASan/UBSan + headless tam-pane), --layout list/bogus,
+    readelf -d (libc and libm only), sh -n, demo-layouts PTY smoke test,
+    and tam-idol/tools/idol-check.
+  - Fred tested and accepted tam-last 0.1.2 on 2026-11-23.
+
+
+FAILED
+
+  - None.
+
+
+HANDOFF
+
+  - Fred accepted 0.1.2 (compiled layouts, AltGr, dead keys, Compose)
+    on 2026-11-23.
+  - Next milestone is Phase P2, 0.1.3 (input methods via text-input-v3;
+    see plans/P2-key-path.md).

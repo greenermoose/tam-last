@@ -1,0 +1,220 @@
+# Unified dead-key and Compose sequences for tam-last.
+# Format: <sym1> <sym2> [<sym3> [<sym4>]] -> <result>
+
+# --- dead_acute ---
+dead_acute space        -> '
+dead_acute dead_acute   -> ´
+dead_acute a            -> á
+dead_acute A            -> Á
+dead_acute e            -> é
+dead_acute E            -> É
+dead_acute i            -> í
+dead_acute I            -> Í
+dead_acute o            -> ó
+dead_acute O            -> Ó
+dead_acute u            -> ú
+dead_acute U            -> Ú
+dead_acute y            -> ý
+dead_acute Y            -> Ý
+dead_acute c            -> ç
+dead_acute C            -> Ç
+dead_acute n            -> ń
+dead_acute N            -> Ń
+dead_acute s            -> ś
+dead_acute S            -> Ś
+dead_acute z            -> ź
+dead_acute Z            -> Ź
+
+# --- dead_grave ---
+dead_grave space        -> `
+dead_grave dead_grave   -> `
+dead_grave a            -> à
+dead_grave A            -> À
+dead_grave e            -> è
+dead_grave E            -> È
+dead_grave i            -> ì
+dead_grave I            -> Ì
+dead_grave o            -> ò
+dead_grave O            -> Ò
+dead_grave u            -> ù
+dead_grave U            -> Ù
+
+# --- dead_circumflex ---
+dead_circumflex space           -> ^
+dead_circumflex dead_circumflex -> ^
+dead_circumflex a               -> â
+dead_circumflex A               -> Â
+dead_circumflex e               -> ê
+dead_circumflex E               -> Ê
+dead_circumflex i               -> î
+dead_circumflex I               -> Î
+dead_circumflex o               -> ô
+dead_circumflex O               -> Ô
+dead_circumflex u               -> û
+dead_circumflex U               -> Û
+dead_circumflex c               -> ĉ
+dead_circumflex C               -> Ĉ
+
+# --- dead_tilde ---
+dead_tilde space        -> ~
+dead_tilde dead_tilde   -> ~
+dead_tilde a            -> ã
+dead_tilde A            -> Ã
+dead_tilde n            -> ñ
+dead_tilde N            -> Ñ
+dead_tilde o            -> õ
+dead_tilde O            -> Õ
+
+# --- dead_diaeresis ---
+dead_diaeresis space            -> "
+dead_diaeresis dead_diaeresis   -> ¨
+dead_diaeresis a                -> ä
+dead_diaeresis A                -> Ä
+dead_diaeresis e                -> ë
+dead_diaeresis E                -> Ë
+dead_diaeresis i                -> ï
+dead_diaeresis I                -> Ï
+dead_diaeresis o                -> ö
+dead_diaeresis O                -> Ö
+dead_diaeresis u                -> ü
+dead_diaeresis U                -> Ü
+dead_diaeresis y                -> ÿ
+dead_diaeresis Y                -> Ÿ
+
+# --- dead_cedilla ---
+dead_cedilla space          -> ¸
+dead_cedilla dead_cedilla   -> ¸
+dead_cedilla c              -> ç
+dead_cedilla C              -> Ç
+dead_cedilla s              -> ş
+dead_cedilla S              -> Ş
+
+# --- dead_ring ---
+dead_ring space         -> °
+dead_ring dead_ring     -> °
+dead_ring a             -> å
+dead_ring A             -> Å
+dead_ring u             -> ů
+dead_ring U             -> Ů
+
+# --- Compose: accented letters ---
+compose ' a -> á
+compose ' A -> Á
+compose ' e -> é
+compose ' E -> É
+compose ' i -> í
+compose ' I -> Í
+compose ' o -> ó
+compose ' O -> Ó
+compose ' u -> ú
+compose ' U -> Ú
+compose ' y -> ý
+compose ' Y -> Ý
+compose a ' -> á
+compose A ' -> Á
+compose e ' -> é
+compose E ' -> É
+compose i ' -> í
+compose I ' -> Í
+compose o ' -> ó
+compose O ' -> Ó
+compose u ' -> ú
+compose U ' -> Ú
+
+compose ` a -> à
+compose ` A -> À
+compose ` e -> è
+compose ` E -> È
+compose ` i -> ì
+compose ` I -> Ì
+compose ` o -> ò
+compose ` O -> Ò
+compose ` u -> ù
+compose ` U -> Ù
+
+compose ^ a -> â
+compose ^ A -> Â
+compose ^ e -> ê
+compose ^ E -> Ê
+compose ^ i -> î
+compose ^ I -> Î
+compose ^ o -> ô
+compose ^ O -> Ô
+compose ^ u -> û
+compose ^ U -> Û
+
+compose ~ a -> ã
+compose ~ A -> Ã
+compose ~ n -> ñ
+compose ~ N -> Ñ
+compose ~ o -> õ
+compose ~ O -> Õ
+compose n ~ -> ñ
+compose N ~ -> Ñ
+
+compose " a -> ä
+compose " A -> Ä
+compose " e -> ë
+compose " E -> Ë
+compose " i -> ï
+compose " I -> Ï
+compose " o -> ö
+compose " O -> Ö
+compose " u -> ü
+compose " U -> Ü
+compose " y -> ÿ
+compose " Y -> Ÿ
+
+compose , c -> ç
+compose , C -> Ç
+compose c , -> ç
+compose C , -> Ç
+
+compose o a -> å
+compose o A -> Å
+compose / o -> ø
+compose / O -> Ø
+
+# --- Compose: ligatures ---
+compose a e -> æ
+compose A E -> Æ
+compose o e -> œ
+compose O E -> Œ
+compose s s -> ß
+
+# --- Compose: typography & punctuation ---
+compose - - - -> —
+compose - - . -> –
+compose . .   -> …
+compose < <   -> «
+compose > >   -> »
+compose ! !   -> ¡
+compose ? ?   -> ¿
+compose o o   -> °
+compose + -   -> ±
+compose x x   -> ×
+compose : -   -> ÷
+compose s o   -> §
+compose p !   -> ¶
+
+# --- Compose: currency ---
+compose c =   -> €
+compose e =   -> €
+compose L -   -> £
+compose Y =   -> ¥
+compose c /   -> ¢
+
+# --- Compose: arrows ---
+compose < -   -> ←
+compose - >   -> →
+compose = >   -> ⇒
+compose ^ |   -> ↑
+compose v |   -> ↓
+
+# --- Compose: fractions & symbols ---
+compose 1 2   -> ½
+compose 1 4   -> ¼
+compose 3 4   -> ¾
+compose ( c ) -> ©
+compose ( r ) -> ®
+compose t m   -> ™

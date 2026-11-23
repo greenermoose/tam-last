@@ -1,0 +1,36 @@
+# French AZERTY
+name fr
+altgr rightalt
+include us
+
+KEY_GRAVE       ²   none    none    none
+KEY_1           &   1       none    none
+KEY_2           é   2       ~       none
+KEY_3           "   3       #       none
+KEY_4           '   4       {       none
+KEY_5           (   5       [       none
+KEY_6           -   6       |       none
+KEY_7           è   7       `       none
+KEY_8           _   8       \       none
+KEY_9           ç   9       ^       none
+KEY_0           à   0       @       none
+KEY_MINUS       )   °       ]       none
+KEY_EQUAL       =   +       }       none
+
+KEY_Q           a   A       æ       Æ
+KEY_W           z   Z       none    none
+KEY_E           e   E       €       none
+KEY_LEFTBRACE   dead_circumflex dead_diaeresis none none
+KEY_RIGHTBRACE  $   £       ¤       none
+
+KEY_A           q   Q       none    none
+KEY_SEMICOLON   m   M       none    none
+KEY_APOSTROPHE  ù   %       none    none
+KEY_BACKSLASH   *   µ       none    none
+KEY_102ND       <   >       none    none
+
+KEY_Z           w   W       none    none
+KEY_M           ,   ?       none    none
+KEY_COMMA       ;   .       none    none
+KEY_DOT         :   /       none    none
+KEY_SLASH       !   §       none    none

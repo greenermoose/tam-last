@@ -1,0 +1,46 @@
+# US International with dead keys and AltGr
+name us-intl
+altgr rightalt
+include us
+
+KEY_GRAVE       dead_grave  dead_tilde      `   ~
+KEY_1           1           !               ¡   ¹
+KEY_2           2           @               ²   none
+KEY_3           3           #               ³   none
+KEY_4           4           $               ¤   £
+KEY_5           5           %               €   none
+KEY_6           6           dead_circumflex ¼   ^
+KEY_7           7           &               ½   none
+KEY_8           8           *               ¾   none
+KEY_9           9           (               ‘   none
+KEY_0           0           )               ’   none
+KEY_MINUS       -           _               ¥   none
+KEY_EQUAL       =           +               ×   ÷
+
+KEY_Q           q           Q               ä   Ä
+KEY_W           w           W               å   Å
+KEY_E           e           E               é   É
+KEY_R           r           R               ®   none
+KEY_T           t           T               þ   Þ
+KEY_Y           y           Y               ü   Ü
+KEY_U           u           U               ú   Ú
+KEY_I           i           I               í   Í
+KEY_O           o           O               ó   Ó
+KEY_P           p           P               ö   Ö
+KEY_LEFTBRACE   [           {               «   none
+KEY_RIGHTBRACE  ]           }               »   none
+
+KEY_A           a           A               á   Á
+KEY_S           s           S               ß   §
+KEY_D           d           D               ð   Ð
+KEY_L           l           L               ø   Ø
+KEY_SEMICOLON   ;           :               ¶   °
+KEY_APOSTROPHE  dead_acute  dead_diaeresis  ´   ¨
+KEY_BACKSLASH   \           |               ¬   ¦
+
+KEY_Z           z           Z               æ   Æ
+KEY_C           c           C               ©   ¢
+KEY_N           n           N               ñ   Ñ
+KEY_M           m           M               µ   none
+KEY_COMMA       ,           <               ç   Ç
+KEY_SLASH       /           ?               ¿   none

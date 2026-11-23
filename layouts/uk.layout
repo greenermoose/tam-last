@@ -1,0 +1,18 @@
+# British English (UK QWERTY)
+name uk
+altgr rightalt
+include us
+
+KEY_GRAVE       `   ¬   ¦   none
+KEY_2           2   "   ²   none
+KEY_3           3   £   ³   none
+KEY_4           4   $   €   none
+KEY_E           e   E   é   É
+KEY_U           u   U   ú   Ú
+KEY_I           i   I   í   Í
+KEY_O           o   O   ó   Ó
+KEY_A           a   A   á   Á
+KEY_APOSTROPHE  '   @   dead_circumflex none
+KEY_BACKSLASH   #   ~   dead_grave none
+KEY_102ND       \   |   ¦   none
+KEY_C           c   C   ç   Ç

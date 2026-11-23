@@ -36,6 +36,8 @@ IN THIS REPOSITORY
                                viewer (toggle flags 1..16 with F1..F5)
     ./sandbox/demo-keys        0.1.1: launches tam-last --keys with a raw
                                receiver to compare trace vs pty bytes
+    ./sandbox/demo-layouts     0.1.2: launches tam-last --keys --layout us-intl
+                               (or another layout) for AltGr, dead keys & Compose
     sandbox/theme-gruvbox.ini  sample tam_ini config (Gruvbox, 11 pt)
 
   Pass --in-term to any demo script to run it in the current terminal

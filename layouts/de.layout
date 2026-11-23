@@ -1,0 +1,32 @@
+# German QWERTZ
+name de
+altgr rightalt
+include us
+
+KEY_GRAVE       dead_circumflex °       none    none
+KEY_2           2               "       ²       none
+KEY_3           3               §       ³       none
+KEY_6           6               &       none    none
+KEY_7           7               /       {       none
+KEY_8           8               (       [       none
+KEY_9           9               )       ]       none
+KEY_0           0               =       }       none
+KEY_MINUS       ß               ?       \       none
+KEY_EQUAL       dead_acute      dead_grave none none
+
+KEY_Q           q               Q       @       none
+KEY_E           e               E       €       none
+KEY_Y           z               Z       none    none
+KEY_LEFTBRACE   ü               Ü       none    none
+KEY_RIGHTBRACE  +               *       ~       none
+
+KEY_SEMICOLON   ö               Ö       none    none
+KEY_APOSTROPHE  ä               Ä       none    none
+KEY_BACKSLASH   #               '       none    none
+KEY_102ND       <               >       |       none
+
+KEY_Z           y               Y       none    none
+KEY_M           m               M       µ       none
+KEY_COMMA       ,               ;       none    none
+KEY_DOT         .               :       none    none
+KEY_SLASH       -               _       none    none

@@ -45,6 +45,8 @@ struct app {
 	struct tl_font font;
 	struct tl_pty pty;
 	struct tl_kbd kbd;
+	const struct tl_layout *key_layout;
+	struct tl_compose compose;
 	struct tl_palette pal;
 	struct tl_config cfg;
 	const char *font_path;
@@ -96,16 +98,26 @@ static void on_sigchld(int sig)
 
 static void usage(FILE *out)
 {
-	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [--keys] [-e COMMAND [ARG...]]\n"
+	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-l LAYOUT] [--keys] [-e COMMAND [ARG...]]\n"
 	      "\n"
 	      "  -c, --config FILE  configuration file (default: ~/.config/tam-last/tam-last.ini)\n"
 	      "  -f, --font FILE    a TrueType font file (default: $TAM_LAST_FONT,\n"
 	      "                     then JetBrains Mono, DejaVu Sans Mono, ...)\n"
 	      "  -s, --size POINTS  font size (default 9)\n"
+	      "  -l, --layout NAME  keyboard layout (default: us; 'list' prints available)\n"
 	      "      --keys         trace every key event to stderr and a bottom bar\n"
 	      "  -e COMMAND ...     run COMMAND instead of $SHELL\n"
 	      "  -v, --version      print the version\n"
 	      "  -h, --help         this help\n", out);
+}
+
+static void list_layouts(FILE *out)
+{
+	for (size_t i = 0; i < tl_layout_count(); i++) {
+		const struct tl_layout *l = tl_layout_at(i);
+		if (l != NULL)
+			fprintf(out, "%s\n", l->name);
+	}
 }
 
 static void ts_add_ms(struct timespec *t, long ms)
@@ -265,24 +277,27 @@ static void trace_key(struct app *a, uint32_t code, enum tl_key_event ev,
 	a->need_draw = true;
 }
 
+static struct tl_key_modes key_modes(const struct app *a)
+{
+	struct tl_key_modes m = {
+		a->term.app_cursor, a->term.app_keypad, a->kbd.num, a->kbd.caps,
+		tl_term_kitty_kbd_flags(&a->term), a->key_layout,
+	};
+	return m;
+}
+
 static void trace_shortcut(struct app *a, uint32_t code, const char *note)
 {
 	a->shortcut_code = code;
 	if (!a->keys_mode)
 		return;
-	struct tl_key_modes m = {
-		a->term.app_cursor, a->term.app_keypad, a->kbd.num, a->kbd.caps,
-		tl_term_kitty_kbd_flags(&a->term),
-	};
+	struct tl_key_modes m = key_modes(a);
 	trace_key(a, code, TL_KEY_PRESS, &m, NULL, 0, note);
 }
 
 static void send_key(struct app *a, uint32_t code, enum tl_key_event ev)
 {
-	struct tl_key_modes m = {
-		a->term.app_cursor, a->term.app_keypad, a->kbd.num, a->kbd.caps,
-		tl_term_kitty_kbd_flags(&a->term),
-	};
+	struct tl_key_modes m = key_modes(a);
 	char seq[TL_KEY_SEQ_MAX];
 	size_t n = tl_key_encode_event(code, tl_kbd_mods(&a->kbd), ev, &m, seq);
 	if (n > 0)
@@ -540,11 +555,7 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 		if (code == a->shortcut_code && a->shortcut_code != 0) {
 			a->shortcut_code = 0;
 			if (a->keys_mode) {
-				struct tl_key_modes m = {
-					a->term.app_cursor, a->term.app_keypad,
-					a->kbd.num, a->kbd.caps,
-					tl_term_kitty_kbd_flags(&a->term),
-				};
+				struct tl_key_modes m = key_modes(a);
 				trace_key(a, code, TL_KEY_RELEASE, &m,
 					NULL, 0, NULL);
 			}
@@ -592,6 +603,69 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 	}
 	if (!tl_key_is_modifier(code))
 		tl_term_reset_view(&a->term);
+
+	/* Compose and dead-key handling (when no Ctrl/Alt/Meta is held). */
+	bool ctrl_alt_meta = (mods & (TL_MOD_CTRL | TL_MOD_ALT | TL_MOD_META)) != 0;
+	if (!ctrl_alt_meta && code == TL_KEY_COMPOSE) {
+		uint32_t dummy = 0;
+		(void)tl_compose_feed(&a->compose, TL_COMPOSE_START, &dummy);
+		if (a->keys_mode) {
+			struct tl_key_modes m = key_modes(a);
+			trace_key(a, code, TL_KEY_PRESS, &m, NULL, 0,
+				"compose");
+		}
+		return;
+	}
+	if (tl_compose_active(&a->compose) && code == TL_KEY_ESC) {
+		tl_compose_reset(&a->compose);
+		if (a->keys_mode) {
+			struct tl_key_modes m = key_modes(a);
+			trace_key(a, code, TL_KEY_PRESS, &m, NULL, 0,
+				"compose-cancel");
+		}
+		return;
+	}
+	if (!ctrl_alt_meta && !tl_key_is_modifier(code)) {
+		struct tl_key_modes m = key_modes(a);
+		uint32_t sym = tl_key_char(code, mods, &m);
+		if (sym != 0 &&
+		    ((sym & TL_KEY_DEAD_BIT) != 0 ||
+		     tl_compose_active(&a->compose))) {
+			uint32_t cp = 0;
+			enum tl_compose_status st =
+				tl_compose_feed(&a->compose, sym, &cp);
+			if (st == TL_COMPOSE_PENDING) {
+				if (a->keys_mode) {
+					const char *dn = tl_dead_key_name(sym);
+					trace_key(a, code, TL_KEY_PRESS, &m,
+						NULL, 0,
+						dn != NULL ? dn : "compose");
+				}
+				return;
+			}
+			if (st == TL_COMPOSE_DONE) {
+				char seq[TL_KEY_SEQ_MAX];
+				size_t n = tl_key_encode_text(cp, seq);
+				if (n > 0)
+					(void)tl_pty_queue(&a->pty, seq, n);
+				if (a->keys_mode) {
+					char note[32];
+					snprintf(note, sizeof(note),
+						"composed U+%04X", cp);
+					trace_key(a, code, TL_KEY_PRESS, &m,
+						seq, n, note);
+				}
+				return;
+			}
+			if (st == TL_COMPOSE_CANCELLED) {
+				if (a->keys_mode)
+					trace_key(a, code, TL_KEY_PRESS, &m,
+						NULL, 0, "compose-cancel");
+				return;
+			}
+		}
+	}
+
 	send_key(a, code, TL_KEY_PRESS);
 	if (!tl_key_is_modifier(code) && a->repeat_rate > 0) {
 		a->repeat_code = code;
@@ -723,6 +797,7 @@ static void on_focus_out(void *ud)
 {
 	struct app *a = ud;
 	tl_kbd_leave(&a->kbd);
+	tl_compose_reset(&a->compose);
 	a->repeat_code = 0;
 	a->focused = false;
 	draw(a, false);
@@ -793,6 +868,7 @@ int main(int argc, char **argv)
 {
 	const char *config_path = NULL;
 	const char *font_path = NULL;
+	const char *layout_name = NULL;
 	float pt = 0;
 	bool pt_set = false;
 	bool keys_mode = false;
@@ -822,6 +898,9 @@ int main(int argc, char **argv)
 				return 2;
 			}
 			pt_set = true;
+		} else if ((strcmp(s, "-l") == 0 || strcmp(s, "--layout") == 0) &&
+			   i + 1 < argc) {
+			layout_name = argv[++i];
 		} else if (strcmp(s, "--keys") == 0) {
 			keys_mode = true;
 		} else if (strcmp(s, "-v") == 0 || strcmp(s, "--version") == 0) {
@@ -835,6 +914,11 @@ int main(int argc, char **argv)
 			usage(stderr);
 			return 2;
 		}
+	}
+
+	if (layout_name != NULL && strcmp(layout_name, "list") == 0) {
+		list_layouts(stdout);
+		return 0;
 	}
 
 	setup_locale();
@@ -863,7 +947,17 @@ int main(int argc, char **argv)
 	}
 	a.pal = a.cfg.pal;
 	a.pad_logical = a.cfg.pad;
+	const char *want_layout = layout_name != NULL ? layout_name : a.cfg.layout;
+	a.key_layout = tl_layout_find(want_layout);
+	if (a.key_layout == NULL) {
+		fprintf(stderr, "tam-last: unknown layout: %s\navailable layouts:\n",
+			want_layout);
+		list_layouts(stderr);
+		return 2;
+	}
 	tl_kbd_init(&a.kbd);
+	tl_kbd_set_layout(&a.kbd, a.key_layout);
+	tl_compose_init(&a.compose);
 
 	const char *want_font = font_path != NULL ? font_path :
 		(a.cfg.font[0] != '\0' ? a.cfg.font : NULL);

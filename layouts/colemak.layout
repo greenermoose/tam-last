@@ -1,0 +1,48 @@
+# US Colemak with AltGr accents and symbols
+name colemak
+altgr rightalt
+include us
+
+KEY_1           1   !   ¡   ¹
+KEY_2           2   @   ²   none
+KEY_3           3   #   ³   none
+KEY_4           4   $   £   ¥
+KEY_5           5   %   €   none
+KEY_MINUS       -   _   –   —
+KEY_EQUAL       =   +   ×   ÷
+
+KEY_Q           q   Q   ä   Ä
+KEY_W           w   W   å   Å
+KEY_E           f   F   ã   Ã
+KEY_R           p   P   ø   Ø
+KEY_T           g   G   none none
+KEY_Y           j   J   none none
+KEY_U           l   L   none none
+KEY_I           u   U   ú   Ú
+KEY_O           y   Y   ü   Ü
+KEY_P           ;   :   ö   Ö
+KEY_LEFTBRACE   [   {   «   none
+KEY_RIGHTBRACE  ]   }   »   none
+
+KEY_A           a   A   á   Á
+KEY_S           r   R   dead_grave none
+KEY_D           s   S   ß   §
+KEY_F           t   T   dead_acute dead_diaeresis
+KEY_G           d   D   ð   Ð
+KEY_H           h   H   none none
+KEY_J           n   N   ñ   Ñ
+KEY_K           e   E   é   É
+KEY_L           i   I   í   Í
+KEY_SEMICOLON   o   O   ó   Ó
+KEY_APOSTROPHE  '   "   õ   Õ
+
+KEY_Z           z   Z   æ   Æ
+KEY_X           x   X   dead_circumflex none
+KEY_C           c   C   ç   Ç
+KEY_V           v   V   œ   Œ
+KEY_B           b   B   none none
+KEY_N           k   K   none none
+KEY_M           m   M   µ   none
+KEY_COMMA       ,   <   dead_cedilla none
+KEY_DOT         .   >   …   none
+KEY_SLASH       /   ?   ¿   none

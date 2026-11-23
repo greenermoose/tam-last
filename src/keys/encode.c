@@ -177,6 +177,42 @@ static size_t put(char out[TL_KEY_SEQ_MAX], bool alt, const char *s,
 	return len + n;
 }
 
+size_t tl_utf8_encode(uint32_t cp, char out[4])
+{
+	if (cp == 0 || cp > 0x10ffffu || (cp >= 0xd800u && cp <= 0xdfffu))
+		return 0;
+	if (cp < 0x80u) {
+		out[0] = (char)cp;
+		return 1;
+	}
+	if (cp < 0x800u) {
+		out[0] = (char)(0xc0u | (cp >> 6));
+		out[1] = (char)(0x80u | (cp & 0x3fu));
+		return 2;
+	}
+	if (cp < 0x10000u) {
+		out[0] = (char)(0xe0u | (cp >> 12));
+		out[1] = (char)(0x80u | ((cp >> 6) & 0x3fu));
+		out[2] = (char)(0x80u | (cp & 0x3fu));
+		return 3;
+	}
+	out[0] = (char)(0xf0u | (cp >> 18));
+	out[1] = (char)(0x80u | ((cp >> 12) & 0x3fu));
+	out[2] = (char)(0x80u | ((cp >> 6) & 0x3fu));
+	out[3] = (char)(0x80u | (cp & 0x3fu));
+	return 4;
+}
+
+size_t tl_key_encode_text(uint32_t cp, char out[TL_KEY_SEQ_MAX])
+{
+	char utf8[4];
+	size_t n = tl_utf8_encode(cp, utf8);
+	if (n == 0)
+		return 0;
+	memcpy(out, utf8, n);
+	return n;
+}
+
 static size_t fmt_csi_u(char out[TL_KEY_SEQ_MAX], uint32_t key,
 	uint32_t shifted, unsigned kmods, enum tl_key_event ev, bool report_ev,
 	uint32_t text)
@@ -295,15 +331,22 @@ static size_t encode_legacy(uint32_t code, unsigned mods,
 
 	uint32_t ch = m->num_lock ? keypad_digit(code) : 0;
 	if (ch == 0)
-		ch = tl_keymap_us(code, shift, m->caps_lock);
-	if (ch == 0)
+		ch = tl_layout_lookup(m->layout, code, mods, m->caps_lock);
+	if (ch == 0 || (ch & TL_KEY_DEAD_BIT) != 0)
 		return 0;
-	if (ctrl)
+	if (ctrl) {
 		ch = ctrl_char(ch);
-	/* The US layout is ASCII, so one byte. Meta alone changes nothing:
-	 * legacy encoding has no way to say it. */
-	char c = (char)ch;
-	return put(out, alt, &c, 1);
+		if (ch == 0) {
+			char z = '\0';
+			return put(out, alt, &z, 1);
+		}
+	}
+	/* Meta alone changes nothing: legacy encoding has no way to say it. */
+	char utf8[4];
+	size_t ulen = tl_utf8_encode(ch, utf8);
+	if (ulen == 0)
+		return 0;
+	return put(out, alt, utf8, ulen);
 }
 
 size_t tl_key_encode_event(uint32_t code, unsigned mods, enum tl_key_event ev,
@@ -389,11 +432,17 @@ size_t tl_key_encode_event(uint32_t code, unsigned mods, enum tl_key_event ev,
 	}
 
 	/* Printable text keys. */
-	uint32_t unshifted = tl_keymap_us(code, false, false);
-	if (unshifted == 0) {
-		if (ev == TL_KEY_RELEASE)
-			return 0;
-		return encode_legacy(code, mods, m, out);
+	uint32_t unshifted = tl_layout_lookup(m->layout, code, 0, false);
+	uint32_t cur_sym = tl_layout_lookup(m->layout, code, mods, m->caps_lock);
+	if ((cur_sym & TL_KEY_DEAD_BIT) != 0)
+		return 0;
+	if (unshifted == 0 || (unshifted & TL_KEY_DEAD_BIT) != 0) {
+		if (cur_sym == 0) {
+			if (ev == TL_KEY_RELEASE)
+				return 0;
+			return encode_legacy(code, mods, m, out);
+		}
+		unshifted = cur_sym;
 	}
 
 	bool use_csi_u = report_all || (disambig && non_shift_mod);
@@ -403,11 +452,12 @@ size_t tl_key_encode_event(uint32_t code, unsigned mods, enum tl_key_event ev,
 		return encode_legacy(code, mods, m, out);
 	}
 
-	uint32_t shifted = tl_keymap_us(code, true, false);
+	uint32_t shifted = tl_layout_lookup(m->layout, code, TL_MOD_SHIFT, false);
+	if ((shifted & TL_KEY_DEAD_BIT) != 0)
+		shifted = 0;
 	uint32_t alt_shifted = (report_alt && (mods & TL_MOD_SHIFT) &&
-		shifted != unshifted) ? shifted : 0;
-	uint32_t text_cp = tl_keymap_us(code, (mods & TL_MOD_SHIFT) != 0,
-		m->caps_lock);
+		shifted != 0 && shifted != unshifted) ? shifted : 0;
+	uint32_t text_cp = cur_sym;
 	uint32_t assoc = (report_text && ev != TL_KEY_RELEASE &&
 		!non_shift_mod && text_cp >= 32 && text_cp != 127) ? text_cp : 0;
 	return fmt_csi_u(out, unshifted, alt_shifted, kmods, ev, report_ev,

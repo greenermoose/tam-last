@@ -13,6 +13,7 @@ int main(int argc, char **argv)
 	struct tl_config cfg;
 
 	tl_config_default(&cfg);
+	CHECK(strcmp(cfg.layout, "us") == 0);
 	CHECK(cfg.size == 9.0f);
 	CHECK(cfg.pad == 2);
 	CHECK(cfg.pal.fg == 0xa9b1d6);
@@ -28,6 +29,7 @@ int main(int argc, char **argv)
 		"font-italic = /tmp/custom-Italic.ttf\n"
 		"font-bold-italic = /tmp/custom-BoldItalic.ttf\n"
 		"font-fallback = /tmp/fallback.ttf\n"
+		"layout = us-intl\n"
 		"size = 11.5\n"
 		"pad = 8\n"
 		"\n"
@@ -45,6 +47,7 @@ int main(int argc, char **argv)
 	CHECK(strcmp(cfg.font_italic, "/tmp/custom-Italic.ttf") == 0);
 	CHECK(strcmp(cfg.font_bold_italic, "/tmp/custom-BoldItalic.ttf") == 0);
 	CHECK(strcmp(cfg.font_fallback, "/tmp/fallback.ttf") == 0);
+	CHECK(strcmp(cfg.layout, "us-intl") == 0);
 	CHECK(cfg.size > 11.4f && cfg.size < 11.6f);
 	CHECK(cfg.pad == 8);
 	CHECK(cfg.pal.fg == 0xffffff);
@@ -70,12 +73,14 @@ int main(int argc, char **argv)
 	/* Bad values leave previous values intact. */
 	const char *bad =
 		"[main]\n"
+		"layout = bogus-layout\n"
 		"size = 999\n"
 		"pad = -5\n"
 		"[colors]\n"
 		"foreground = nothex\n"
 		"background = 12345\n";
 	CHECK(tl_config_load_string(&cfg, bad) == 0);
+	CHECK(strcmp(cfg.layout, "us-intl") == 0);
 	CHECK(cfg.size > 11.4f && cfg.size < 11.6f);
 	CHECK(cfg.pad == 8);
 	CHECK(cfg.pal.fg == 0x123456);

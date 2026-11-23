@@ -93,7 +93,7 @@ uint32_t tl_key_char(uint32_t code, unsigned mods,
 		default: break;
 		}
 	}
-	return tl_keymap_us(code, (mods & TL_MOD_SHIFT) != 0,
+	return tl_layout_lookup(m != NULL ? m->layout : NULL, code, mods,
 		m != NULL && m->caps_lock);
 }
 
@@ -163,6 +163,7 @@ size_t tl_key_trace_format(char *buf, size_t cap, uint32_t code,
 		{ TL_MOD_ALT,   "Alt" },
 		{ TL_MOD_CTRL,  "Ctrl" },
 		{ TL_MOD_META,  "Meta" },
+		{ TL_MOD_ALTGR, "AltGr" },
 	};
 	bool any = false;
 	for (size_t i = 0; i < sizeof(mod_list) / sizeof(mod_list[0]); i++) {
@@ -189,11 +190,14 @@ size_t tl_key_trace_format(char *buf, size_t cap, uint32_t code,
 	else
 		sb_putc(&s, '-');
 
-	/* Layout character. */
+	/* Layout character or dead key. */
 	sb_puts(&s, " char=");
 	uint32_t ch = tl_key_char(code, mods, m);
+	const char *dname = tl_dead_key_name(ch);
 	if (ch == 0) {
 		sb_putc(&s, '-');
+	} else if (dname != NULL) {
+		sb_puts(&s, dname);
 	} else if (ch == '\'') {
 		sb_puts(&s, "'\\''");
 	} else if (ch == '\\') {

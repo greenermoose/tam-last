@@ -1,0 +1,39 @@
+LAYOUTS
+
+Compact keyboard layout definitions and compose rules for tam-last,
+compiled at build time into C tables by tools/gen-layouts.c.
+
+FORMAT (.layout)
+
+  UTF-8 text, one entry per line. Lines whose first non-space byte is
+  '#' are comments.
+
+  Directives:
+    name <id>           layout identifier (for --layout and tam-last.ini)
+    altgr none|rightalt whether KEY_RIGHTALT acts as AltGr (level 3/4)
+    include <id>        copy base mappings from an earlier layout
+
+  Key lines:
+    KEY_<NAME>  <lvl0>  <lvl1>  [<lvl2>  [<lvl3>]]
+
+    lvl0 = base, lvl1 = Shift, lvl2 = AltGr, lvl3 = AltGr+Shift.
+    Omitted lvl2/lvl3 default to none.
+
+  Tokens:
+    none                unmapped level (0)
+    space               U+0020
+    U+XXXX              Unicode codepoint (4-6 hex digits)
+    dead_<name>         dead key (dead_acute, dead_grave,
+                        dead_circumflex, dead_tilde, dead_diaeresis,
+                        dead_cedilla, dead_ring)
+    <char>              any single UTF-8 character
+
+FORMAT (compose)
+
+  One rule per line:
+    <sym1> <sym2> [<sym3> [<sym4>]] -> <result>
+
+  Dead-key rules begin with dead_<name>. Multi-key Compose sequences
+  begin with the token 'compose' (triggered by KEY_COMPOSE). No rule
+  may be a prefix of another; gen-layouts rejects conflicts at build
+  time.

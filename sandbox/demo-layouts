@@ -1,0 +1,62 @@
+#!/bin/sh
+# Interactive demo for tam-last 0.1.2: compiled layouts, AltGr, dead keys,
+# and Compose sequences.
+# Usage: ./sandbox/demo-layouts [LAYOUT]
+# Defaults to us-intl and launches build/tam-last --keys --layout LAYOUT.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	LAYOUT=${1:-us-intl}
+	exec "$ROOT/build/tam-last" --keys --layout "$LAYOUT" -e "$0" --in-term "$LAYOUT"
+fi
+
+LAYOUT=${2:-us-intl}
+
+if ! [ -t 0 ]; then
+	printf 'demo-layouts needs a terminal.\n' >&2
+	exit 1
+fi
+
+exec python3 -c '
+import os, select, sys, termios, tty
+
+layout = sys.argv[1]
+fd = sys.stdin.fileno()
+old = termios.tcgetattr(fd)
+
+def write(s):
+    os.write(sys.stdout.fileno(), s.encode("utf-8"))
+
+def fmt_hex(b):
+    return " ".join(f"{c:02x}" for c in b)
+
+def header():
+    write("\033[2J\033[H")
+    write(f"\033[1;36m=== tam-last 0.1.2: Layouts, AltGr, Dead Keys & Compose ({layout}) ===\033[0m\r\n")
+    write("Watch the bottom --keys bar and the received UTF-8 below (Ctrl+Q quits):\r\n")
+    write("  - AltGr (Right Alt) in us-intl: RightAlt+e -> \u00e9, RightAlt+5 -> \u20ac, RightAlt+n -> \u00f1\r\n")
+    write("  - Dead keys in us-intl:         '\'' then e -> \u00e9, '\'' then Space -> '\'', '\'' then '\'' -> \u00b4\r\n")
+    write("                                  ~ then n -> \u00f1, \" then u -> \u00fc, ^ then o -> \u00f4\r\n")
+    write("  - Compose (Menu key, any layout): Compose - - - -> \u2014, Compose c = -> \u20ac, Compose o o -> \u00b0\r\n")
+    write("                                    Compose ( c ) -> \u00a9, Esc cancels an active sequence\r\n\r\n")
+
+try:
+    tty.setraw(fd)
+    header()
+    while True:
+        r, _, _ = select.select([fd], [], [])
+        if not r:
+            continue
+        data = os.read(fd, 256)
+        if not data or data == b"\x11":
+            break
+        text = data.decode("utf-8", "replace")
+        disp = "".join(ch if ord(ch) >= 32 and ch != "\x7f" else f"\\x{ord(ch):02x}" for ch in text)
+        cps = " ".join(f"U+{ord(ch):04X}" for ch in text)
+        write(f"  received: \"{disp}\"  ({cps})  [{fmt_hex(data)}]\r\n")
+finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    write("\r\n")
+' "$LAYOUT"

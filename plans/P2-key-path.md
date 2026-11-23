@@ -1,6 +1,6 @@
 # P2: The key path (0.1.x)
 
-**Status:** in progress (0.1.0, 0.1.1 implemented).
+**Status:** in progress (0.1.0, 0.1.1, 0.1.2 implemented).
 
 ## Goal
 

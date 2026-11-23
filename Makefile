@@ -30,16 +30,34 @@ override CFLAGS += -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wvla \
 LIBTAM := $(LIBTAM_PREFIX)/lib/libtam.a
 LDLIBS = $(LIBTAM) -lm
 
+# Compiled-in keyboard layouts (us first so 'include us' resolves) and compose.
+LAYOUT_SRCS = layouts/us.layout layouts/us-intl.layout layouts/dvorak.layout \
+	layouts/colemak.layout layouts/uk.layout layouts/de.layout \
+	layouts/fr.layout
+COMPOSE_SRC = layouts/compose
+
 # Everything but main.c, so the unit tests can link it.
 CORE_SRCS = src/wl/conn.c src/wl/proto.c src/window.c src/shm.c \
 	src/font/ttf.c src/font/raster.c src/font/box.c src/font/font.c \
 	src/config.c src/vt.c src/term.c src/select.c src/render.c \
-	src/keys/keymap.c src/keys/encode.c src/keys/trace.c src/pty.c
-CORE_OBJS = $(patsubst src/%.c,$(B)/%.o,$(CORE_SRCS))
+	src/keys/keymap.c src/keys/compose.c src/keys/encode.c \
+	src/keys/trace.c src/pty.c
+CORE_OBJS = $(patsubst src/%.c,$(B)/%.o,$(CORE_SRCS)) $(B)/keys/layouts_gen.o
 TESTS = $(B)/tests/test_wire $(B)/tests/test_vt $(B)/tests/test_ttf \
 	$(B)/tests/test_keys $(B)/tests/test_render $(B)/tests/test_config
 
 all: $(B)/tam-last
+
+$(B)/gen-layouts: tools/gen-layouts.c include/tam-last/evdev.h include/tam-last/keys.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ tools/gen-layouts.c
+
+$(B)/layouts_gen.c: $(B)/gen-layouts $(LAYOUT_SRCS) $(COMPOSE_SRC)
+	$(B)/gen-layouts -o $@ -c $(COMPOSE_SRC) $(LAYOUT_SRCS)
+
+$(B)/keys/layouts_gen.o: $(B)/layouts_gen.c include/tam-last/keys.h include/tam-last/evdev.h
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(B)/tam-last: $(B)/main.o $(CORE_OBJS) $(LIBTAM)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(B)/main.o $(CORE_OBJS) $(LDLIBS)

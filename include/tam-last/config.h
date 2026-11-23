@@ -13,6 +13,7 @@ struct tl_config {
 	char font_italic[512];
 	char font_bold_italic[512];
 	char font_fallback[512];
+	char layout[64];
 	float size;
 	int pad;
 	struct tl_palette pal;

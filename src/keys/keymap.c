@@ -1,4 +1,4 @@
-/* Keyboard state and the compiled-in US layout.
+/* Keyboard state and compiled-in layout lookup.
  *
  * The compositor also sends an XKB keymap, but tam-last does not read it:
  * the evdev code is the ground truth, and the layout is ours. Held
@@ -8,41 +8,72 @@
 
 #include <string.h>
 
-/* { unshifted, shifted } for each evdev code that types a character. */
-static const char us[TL_KEY_COUNT][2] = {
-	[TL_KEY_1] = { '1', '!' }, [TL_KEY_2] = { '2', '@' },
-	[TL_KEY_3] = { '3', '#' }, [TL_KEY_4] = { '4', '$' },
-	[TL_KEY_5] = { '5', '%' }, [TL_KEY_6] = { '6', '^' },
-	[TL_KEY_7] = { '7', '&' }, [TL_KEY_8] = { '8', '*' },
-	[TL_KEY_9] = { '9', '(' }, [TL_KEY_0] = { '0', ')' },
-	[TL_KEY_MINUS] = { '-', '_' }, [TL_KEY_EQUAL] = { '=', '+' },
-	[TL_KEY_Q] = { 'q', 'Q' }, [TL_KEY_W] = { 'w', 'W' },
-	[TL_KEY_E] = { 'e', 'E' }, [TL_KEY_R] = { 'r', 'R' },
-	[TL_KEY_T] = { 't', 'T' }, [TL_KEY_Y] = { 'y', 'Y' },
-	[TL_KEY_U] = { 'u', 'U' }, [TL_KEY_I] = { 'i', 'I' },
-	[TL_KEY_O] = { 'o', 'O' }, [TL_KEY_P] = { 'p', 'P' },
-	[TL_KEY_LEFTBRACE] = { '[', '{' }, [TL_KEY_RIGHTBRACE] = { ']', '}' },
-	[TL_KEY_A] = { 'a', 'A' }, [TL_KEY_S] = { 's', 'S' },
-	[TL_KEY_D] = { 'd', 'D' }, [TL_KEY_F] = { 'f', 'F' },
-	[TL_KEY_G] = { 'g', 'G' }, [TL_KEY_H] = { 'h', 'H' },
-	[TL_KEY_J] = { 'j', 'J' }, [TL_KEY_K] = { 'k', 'K' },
-	[TL_KEY_L] = { 'l', 'L' },
-	[TL_KEY_SEMICOLON] = { ';', ':' }, [TL_KEY_APOSTROPHE] = { '\'', '"' },
-	[TL_KEY_GRAVE] = { '`', '~' }, [TL_KEY_BACKSLASH] = { '\\', '|' },
-	[TL_KEY_102ND] = { '\\', '|' },
-	[TL_KEY_Z] = { 'z', 'Z' }, [TL_KEY_X] = { 'x', 'X' },
-	[TL_KEY_C] = { 'c', 'C' }, [TL_KEY_V] = { 'v', 'V' },
-	[TL_KEY_B] = { 'b', 'B' }, [TL_KEY_N] = { 'n', 'N' },
-	[TL_KEY_M] = { 'm', 'M' },
-	[TL_KEY_COMMA] = { ',', '<' }, [TL_KEY_DOT] = { '.', '>' },
-	[TL_KEY_SLASH] = { '/', '?' }, [TL_KEY_SPACE] = { ' ', ' ' },
-	[TL_KEY_KPASTERISK] = { '*', '*' }, [TL_KEY_KPMINUS] = { '-', '-' },
-	[TL_KEY_KPPLUS] = { '+', '+' }, [TL_KEY_KPSLASH] = { '/', '/' },
-};
+static bool is_caps_pair(uint32_t lo, uint32_t hi)
+{
+	if (lo >= 'a' && lo <= 'z' && hi == lo - 32u)
+		return true;
+	if (((lo >= 0x00e0u && lo <= 0x00f6u) ||
+	     (lo >= 0x00f8u && lo <= 0x00feu)) &&
+	    hi == lo - 0x20u)
+		return true;
+	if (lo == 0x0153u && hi == 0x0152u) /* œ / Œ */
+		return true;
+	return false;
+}
+
+const struct tl_layout *tl_layout_default(void)
+{
+	return &tl_layouts[0];
+}
+
+const struct tl_layout *tl_layout_find(const char *name)
+{
+	if (name == NULL || name[0] == '\0')
+		return NULL;
+	for (size_t i = 0; i < tl_layout_count_val; i++) {
+		if (strcmp(tl_layouts[i].name, name) == 0)
+			return &tl_layouts[i];
+	}
+	return NULL;
+}
+
+size_t tl_layout_count(void)
+{
+	return tl_layout_count_val;
+}
+
+const struct tl_layout *tl_layout_at(size_t index)
+{
+	if (index >= tl_layout_count_val)
+		return NULL;
+	return &tl_layouts[index];
+}
+
+const char *tl_dead_key_name(uint32_t sym)
+{
+	if ((sym & TL_KEY_DEAD_BIT) == 0)
+		return NULL;
+	switch (sym & ~TL_KEY_DEAD_BIT) {
+	case TL_DEAD_ACUTE:      return "dead_acute";
+	case TL_DEAD_GRAVE:      return "dead_grave";
+	case TL_DEAD_CIRCUMFLEX: return "dead_circumflex";
+	case TL_DEAD_TILDE:      return "dead_tilde";
+	case TL_DEAD_DIAERESIS:  return "dead_diaeresis";
+	case TL_DEAD_CEDILLA:    return "dead_cedilla";
+	case TL_DEAD_RING:       return "dead_ring";
+	default:                 return NULL;
+	}
+}
 
 void tl_kbd_init(struct tl_kbd *k)
 {
 	memset(k, 0, sizeof(*k));
+	k->layout = tl_layout_default();
+}
+
+void tl_kbd_set_layout(struct tl_kbd *k, const struct tl_layout *layout)
+{
+	k->layout = layout != NULL ? layout : tl_layout_default();
 }
 
 void tl_kbd_key(struct tl_kbd *k, uint32_t code, bool pressed)
@@ -81,12 +112,13 @@ static bool held(const struct tl_kbd *k, uint32_t code)
 unsigned tl_kbd_mods(const struct tl_kbd *k)
 {
 	unsigned m = 0;
+	bool has_altgr = k->layout != NULL && k->layout->has_altgr;
 	if (held(k, TL_KEY_LEFTSHIFT) || held(k, TL_KEY_RIGHTSHIFT))
 		m |= TL_MOD_SHIFT;
-	/* On a US keyboard both Alt keys are Alt; AltGr comes with other
-	 * layouts (P2). */
-	if (held(k, TL_KEY_LEFTALT) || held(k, TL_KEY_RIGHTALT))
+	if (held(k, TL_KEY_LEFTALT))
 		m |= TL_MOD_ALT;
+	if (held(k, TL_KEY_RIGHTALT))
+		m |= has_altgr ? TL_MOD_ALTGR : TL_MOD_ALT;
 	if (held(k, TL_KEY_LEFTCTRL) || held(k, TL_KEY_RIGHTCTRL))
 		m |= TL_MOD_CTRL;
 	if (held(k, TL_KEY_LEFTMETA) || held(k, TL_KEY_RIGHTMETA))
@@ -108,12 +140,23 @@ bool tl_key_is_modifier(uint32_t code)
 	}
 }
 
+uint32_t tl_layout_lookup(const struct tl_layout *layout, uint32_t code,
+	unsigned mods, bool caps)
+{
+	if (code >= TL_KEY_COUNT)
+		return 0;
+	const struct tl_layout *l = layout != NULL ? layout : tl_layout_default();
+	unsigned base = (mods & TL_MOD_ALTGR) ? 2u : 0u;
+	bool shift = (mods & TL_MOD_SHIFT) != 0;
+	uint32_t lo = l->map[code][base];
+	uint32_t hi = l->map[code][base + 1u];
+	if (caps && is_caps_pair(lo, hi))
+		shift = !shift;
+	return shift ? hi : lo;
+}
+
 uint32_t tl_keymap_us(uint32_t code, bool shift, bool caps)
 {
-	if (code >= TL_KEY_COUNT || us[code][0] == 0)
-		return 0;
-	char base = us[code][0];
-	if (caps && base >= 'a' && base <= 'z')
-		shift = !shift;
-	return (unsigned char)us[code][shift ? 1 : 0];
+	return tl_layout_lookup(tl_layout_default(), code,
+		shift ? TL_MOD_SHIFT : 0u, caps);
 }

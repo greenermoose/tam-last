@@ -1,5 +1,6 @@
 /* INI configuration loader using libtam's tam_ini. */
 #include "tam-last/config.h"
+#include "tam-last/keys.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -76,6 +77,13 @@ static int on_ini(void *user, const char *section, const char *name,
 		} else if (strcmp(name, "font-fallback") == 0) {
 			expand_tilde(value, cfg->font_fallback,
 				sizeof(cfg->font_fallback));
+		} else if (strcmp(name, "layout") == 0) {
+			if (tl_layout_find(value) != NULL)
+				snprintf(cfg->layout, sizeof(cfg->layout),
+					"%s", value);
+			else
+				fprintf(stderr, "tam-last: config: unknown layout: %s\n",
+					value);
 		} else if (strcmp(name, "size") == 0) {
 			char *end = NULL;
 			float v = strtof(value, &end);
@@ -179,6 +187,7 @@ static int on_ini(void *user, const char *section, const char *name,
 void tl_config_default(struct tl_config *cfg)
 {
 	memset(cfg, 0, sizeof(*cfg));
+	snprintf(cfg->layout, sizeof(cfg->layout), "%s", "us");
 	cfg->size = 9.0f;
 	cfg->pad = 2;
 	tl_palette_default(&cfg->pal);

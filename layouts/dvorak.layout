@@ -1,0 +1,43 @@
+# US Dvorak
+name dvorak
+altgr none
+include us
+
+KEY_MINUS       [   {
+KEY_EQUAL       ]   }
+
+KEY_Q           '   "
+KEY_W           ,   <
+KEY_E           .   >
+KEY_R           p   P
+KEY_T           y   Y
+KEY_Y           f   F
+KEY_U           g   G
+KEY_I           c   C
+KEY_O           r   R
+KEY_P           l   L
+KEY_LEFTBRACE   /   ?
+KEY_RIGHTBRACE  =   +
+
+KEY_A           a   A
+KEY_S           o   O
+KEY_D           e   E
+KEY_F           u   U
+KEY_G           i   I
+KEY_H           d   D
+KEY_J           h   H
+KEY_K           t   T
+KEY_L           n   N
+KEY_SEMICOLON   s   S
+KEY_APOSTROPHE  -   _
+
+KEY_Z           ;   :
+KEY_X           q   Q
+KEY_C           j   J
+KEY_V           k   K
+KEY_B           x   X
+KEY_N           b   B
+KEY_M           m   M
+KEY_COMMA       w   W
+KEY_DOT         v   V
+KEY_SLASH       z   Z
