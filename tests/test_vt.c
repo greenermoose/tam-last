@@ -300,6 +300,67 @@ int main(void)
 		feed("\r\nx");
 	CHECK(t.sb_len <= TL_SB_MAX_ROWS + TL_SB_PAGE_ROWS);
 
+	/* Kitty keyboard protocol: query, set/OR/clear, push/pop, per-screen stack, RIS. */
+	fresh(20, 4);
+	t.reply_len = 0;
+	feed("\033[?u");
+	CHECK(t.reply_len == 5 && memcmp(t.reply, "\033[?0u", 5) == 0);
+	CHECK(tl_term_kitty_kbd_flags(&t) == 0);
+
+	/* CSI = flags ; mode u (default mode 1 = replace, 2 = OR, 3 = clear). */
+	feed("\033[=1u");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 1);
+	feed("\033[=4;2u");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 5);
+	feed("\033[=1;3u");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 4);
+	feed("\033[=255;1u"); /* masks to 5 valid bits (0x1f = 31) */
+	CHECK(tl_term_kitty_kbd_flags(&t) == 31);
+	t.reply_len = 0;
+	feed("\033[?u");
+	CHECK(t.reply_len == 6 && memcmp(t.reply, "\033[?31u", 6) == 0);
+
+	/* Push and pop on primary screen. */
+	feed("\033[=0u");
+	feed("\033[>1u\033[>3u\033[>7u");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 7);
+	feed("\033[<u"); /* default pop = 1 */
+	CHECK(tl_term_kitty_kbd_flags(&t) == 3);
+	feed("\033[<2u");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 0);
+	feed("\033[<99u"); /* over-pop clamps cleanly to 0 */
+	CHECK(tl_term_kitty_kbd_flags(&t) == 0);
+
+	/* Bounded stack eviction: pushing more than TL_KITTY_KBD_STACK_MAX keeps newest. */
+	for (int i = 1; i <= TL_KITTY_KBD_STACK_MAX + 5; i++) {
+		char seq[16];
+		snprintf(seq, sizeof(seq), "\033[>%du", i & 0x1f);
+		feed(seq);
+	}
+	CHECK(tl_term_kitty_kbd_flags(&t) == ((TL_KITTY_KBD_STACK_MAX + 5) & 0x1f));
+	feed("\033[<1u");
+	CHECK(tl_term_kitty_kbd_flags(&t) == ((TL_KITTY_KBD_STACK_MAX + 4) & 0x1f));
+
+	/* Independent primary vs alternate screen stacks. */
+	feed("\033[<99u\033[>5u");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 5);
+	feed("\033[?1049h");
+	CHECK(t.alt_screen && tl_term_kitty_kbd_flags(&t) == 0);
+	feed("\033[>11u");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 11);
+	t.reply_len = 0;
+	feed("\033[?u");
+	CHECK(t.reply_len == 6 && memcmp(t.reply, "\033[?11u", 6) == 0);
+	feed("\033[?1049l");
+	CHECK(!t.alt_screen && tl_term_kitty_kbd_flags(&t) == 5);
+
+	/* RIS (ESC c) resets both screens' kitty stacks. */
+	feed("\033c");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 0);
+	feed("\033[?1049h");
+	CHECK(tl_term_kitty_kbd_flags(&t) == 0);
+	feed("\033[?1049l");
+
 	/* Garbage never breaks the invariants. */
 	srand(1);
 	unsigned char junk[4096];

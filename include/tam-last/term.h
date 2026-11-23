@@ -43,6 +43,7 @@ enum tl_mouse_mode {
 #define TL_SB_PAGE_ROWS 64
 #define TL_SB_MAX_ROWS 4096
 #define TL_SB_RING_CAP 128
+#define TL_KITTY_KBD_STACK_MAX 16
 
 struct tl_sb_page {
 	struct tl_cell *cells;
@@ -97,6 +98,8 @@ struct tl_term {
 	enum tl_mouse_mode mouse_mode; /* 1000, 1002, 1003 */
 	bool mouse_sgr; /* 1006 */
 	bool bracketed_paste; /* 2004 */
+	uint8_t kitty_kbd[2][TL_KITTY_KBD_STACK_MAX]; /* 0 = primary, 1 = alt */
+	int kitty_kbd_top[2];
 	struct tl_sb_page sb_pages[TL_SB_RING_CAP];
 	int sb_head;
 	int sb_count;
@@ -118,6 +121,8 @@ void tl_term_free(struct tl_term *t);
 int tl_term_resize(struct tl_term *t, int cols, int rows);
 /* Feed what the program wrote. */
 void tl_term_feed(struct tl_term *t, const void *data, size_t len);
+/* Active kitty keyboard protocol flags for the current screen. */
+unsigned tl_term_kitty_kbd_flags(const struct tl_term *t);
 
 /* Scrollback navigation (primary screen only). */
 void tl_term_scroll_view(struct tl_term *t, int delta);

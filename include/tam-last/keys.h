@@ -22,7 +22,22 @@ enum {
 #define TL_XKB_LOCK (1u << 1)
 #define TL_XKB_MOD2 (1u << 4)
 
-#define TL_KEY_SEQ_MAX 32
+#define TL_KEY_SEQ_MAX 64
+
+enum {
+	TL_KITTY_DISAMBIGUATE = 1u << 0,
+	TL_KITTY_EVENTS       = 1u << 1,
+	TL_KITTY_ALTERNATE    = 1u << 2,
+	TL_KITTY_ALL_KEYS     = 1u << 3,
+	TL_KITTY_TEXT         = 1u << 4,
+	TL_KITTY_MASK         = 0x1fu
+};
+
+enum tl_key_event {
+	TL_KEY_PRESS   = 1,
+	TL_KEY_REPEAT  = 2,
+	TL_KEY_RELEASE = 3
+};
 
 struct tl_kbd {
 	uint8_t down[TL_KEY_COUNT / 8];
@@ -50,7 +65,13 @@ struct tl_key_modes {
 	bool app_keypad; /* DECKPAM */
 	bool num_lock;
 	bool caps_lock;
+	unsigned kitty_flags; /* TL_KITTY_* bitmask; 0 = legacy xterm */
 };
+
+/* The bytes for one key event (press, repeat, or release). Returns their
+ * count (0 when the key sends nothing). out has room for TL_KEY_SEQ_MAX. */
+size_t tl_key_encode_event(uint32_t code, unsigned mods, enum tl_key_event ev,
+	const struct tl_key_modes *m, char out[TL_KEY_SEQ_MAX]);
 
 /* The bytes for one key press. Returns their count (0 when the key sends
  * nothing). out has room for TL_KEY_SEQ_MAX bytes. */

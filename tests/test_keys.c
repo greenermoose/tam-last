@@ -17,7 +17,83 @@
 #endif
 #endif
 
-static const struct tl_key_modes plain = { false, false, false, false };
+static const struct tl_key_modes plain = { false, false, false, false, 0 };
+
+static int sends_ev(uint32_t code, unsigned mods, enum tl_key_event ev,
+	const struct tl_key_modes *m, const char *want, size_t want_len)
+{
+	char out[TL_KEY_SEQ_MAX];
+	size_t n = tl_key_encode_event(code, mods, ev, m, out);
+	if (n != want_len || memcmp(out, want, n) != 0) {
+		fprintf(stderr, "  key %u mods %u ev %d: got %zu bytes:", code,
+			mods, (int)ev, n);
+		for (size_t i = 0; i < n; i++)
+			fprintf(stderr, " %02x", (unsigned char)out[i]);
+		fputc('\n', stderr);
+		return 0;
+	}
+	return 1;
+}
+#define SENDS_EV(code, mods, ev, m, s) \
+	CHECK(sends_ev(code, mods, ev, m, s, sizeof(s) - 1))
+
+/* Self-contained kitty keyboard protocol decoder for round-trip checks. */
+struct kitty_decoded {
+	uint32_t key;
+	uint32_t shifted;
+	unsigned mods;      /* 0-based kitty modifier bitmask */
+	unsigned ev;        /* 1 = press, 2 = repeat, 3 = release */
+	uint32_t text;
+	char final;
+};
+
+static bool kitty_decode(const char *s, size_t n, struct kitty_decoded *d)
+{
+	memset(d, 0, sizeof(*d));
+	d->ev = 1;
+	if (n < 3 || s[0] != '\033' || s[1] != '[')
+		return false;
+	d->final = s[n - 1];
+	size_t i = 2, end = n - 1;
+	int field = 0, sub = 0;
+	uint32_t vals[3][3] = { { 0 } };
+	bool has[3][3] = { { false } };
+	while (i < end) {
+		char c = s[i++];
+		if (c == ';') {
+			field++;
+			sub = 0;
+			if (field >= 3)
+				return false;
+		} else if (c == ':') {
+			sub++;
+			if (sub >= 3)
+				return false;
+		} else if (c >= '0' && c <= '9') {
+			vals[field][sub] = vals[field][sub] * 10u + (uint32_t)(c - '0');
+			has[field][sub] = true;
+		} else {
+			return false;
+		}
+	}
+	d->key = vals[0][0];
+	d->shifted = has[0][1] ? vals[0][1] : 0;
+	if (has[1][0] && vals[1][0] >= 1)
+		d->mods = vals[1][0] - 1u;
+	if (has[1][1])
+		d->ev = vals[1][1];
+	if (has[2][0])
+		d->text = vals[2][0];
+	return true;
+}
+
+static bool kitty_rt(uint32_t code, unsigned mods, enum tl_key_event ev,
+	const struct tl_key_modes *m, struct kitty_decoded *out_d)
+{
+	char seq[TL_KEY_SEQ_MAX];
+	size_t n = tl_key_encode_event(code, mods, ev, m, seq);
+	return kitty_decode(seq, n, out_d);
+}
 
 static int sends(uint32_t code, unsigned mods, const struct tl_key_modes *m,
 	const char *want, size_t want_len)
@@ -102,9 +178,9 @@ int main(void)
 	CHECK(tl_keymap_us(TL_KEY_F1, false, false) == 0);
 
 	/* The bytes. */
-	struct tl_key_modes app = { true, false, false, false };
-	struct tl_key_modes num = { false, false, true, false };
-	struct tl_key_modes caps = { false, false, false, true };
+	struct tl_key_modes app = { true, false, false, false, 0 };
+	struct tl_key_modes num = { false, false, true, false, 0 };
+	struct tl_key_modes caps = { false, false, false, true, 0 };
 	SENDS(TL_KEY_A, 0, &plain, "a");
 	SENDS(TL_KEY_A, TL_MOD_SHIFT, &plain, "A");
 	SENDS(TL_KEY_A, 0, &caps, "A");
@@ -168,6 +244,114 @@ int main(void)
 	CHECK(round_trip(TL_KEY_A, TL_MOD_CTRL | TL_MOD_SHIFT, TAM_KEY_CHAR, 'a',
 		TAM_MOD_CTRL));
 	CHECK(round_trip(TL_KEY_BACKSPACE, TL_MOD_CTRL, TAM_KEY_BACKSPACE, 0, 0));
+
+	/* Kitty keyboard protocol (0.1.0): flag 1 (disambiguate). */
+	struct tl_key_modes k_dis = { false, false, false, false,
+		TL_KITTY_DISAMBIGUATE };
+	SENDS(TL_KEY_H, TL_MOD_CTRL, &k_dis, "\033[104;5u");
+	SENDS(TL_KEY_I, TL_MOD_CTRL, &k_dis, "\033[105;5u");
+	SENDS(TL_KEY_M, TL_MOD_CTRL, &k_dis, "\033[109;5u");
+	SENDS(TL_KEY_A, TL_MOD_CTRL, &k_dis, "\033[97;5u");
+	SENDS(TL_KEY_A, TL_MOD_CTRL | TL_MOD_SHIFT, &k_dis, "\033[97;6u");
+	SENDS(TL_KEY_BACKSPACE, TL_MOD_CTRL, &k_dis, "\033[127;5u");
+	SENDS(TL_KEY_LEFTBRACE, TL_MOD_CTRL, &k_dis, "\033[91;5u");
+	SENDS(TL_KEY_ESC, 0, &k_dis, "\033[27u");
+	SENDS(TL_KEY_A, TL_MOD_META, &k_dis, "\033[97;9u");
+	SENDS(TL_KEY_TAB, TL_MOD_SHIFT, &k_dis, "\033[9;2u");
+	SENDS(TL_KEY_ENTER, TL_MOD_SHIFT, &k_dis, "\033[13;2u");
+	/* Plain text and unmodified Enter/Tab/Backspace stay legacy under flag 1. */
+	SENDS(TL_KEY_A, 0, &k_dis, "a");
+	SENDS(TL_KEY_A, TL_MOD_SHIFT, &k_dis, "A");
+	SENDS(TL_KEY_ENTER, 0, &k_dis, "\r");
+	SENDS(TL_KEY_TAB, 0, &k_dis, "\t");
+	SENDS(TL_KEY_BACKSPACE, 0, &k_dis, "\177");
+	/* F1-F4 and cursor keys under disambiguate (F3 avoids CPR collision). */
+	struct tl_key_modes k_dis_app = { true, false, false, false,
+		TL_KITTY_DISAMBIGUATE };
+	SENDS(TL_KEY_UP, 0, &k_dis_app, "\033[A");
+	SENDS(TL_KEY_F1, 0, &k_dis, "\033[P");
+	SENDS(TL_KEY_F2, 0, &k_dis, "\033[Q");
+	SENDS(TL_KEY_F3, 0, &k_dis, "\033[13~");
+	SENDS(TL_KEY_F3, TL_MOD_SHIFT, &k_dis, "\033[13;2~");
+	SENDS(TL_KEY_F4, 0, &k_dis, "\033[S");
+	/* Keypad keys get distinct PUA codes under disambiguate. */
+	struct tl_key_modes k_dis_num = { false, false, true, false,
+		TL_KITTY_DISAMBIGUATE };
+	SENDS(TL_KEY_KP5, 0, &k_dis_num, "\033[57404;129u");
+	SENDS(TL_KEY_KP8, 0, &k_dis, "\033[57419u");
+	SENDS(TL_KEY_KPENTER, 0, &k_dis, "\033[57414u");
+
+	/* Round-trip check: every legacy loss is now distinct. */
+	struct kitty_decoded d1, d2;
+	CHECK(kitty_rt(TL_KEY_H, TL_MOD_CTRL, TL_KEY_PRESS, &k_dis, &d1) &&
+		d1.final == 'u' && d1.key == 'h' && d1.mods == TL_MOD_CTRL);
+	CHECK(kitty_rt(TL_KEY_BACKSPACE, TL_MOD_CTRL, TL_KEY_PRESS, &k_dis, &d2) &&
+		d2.final == 'u' && d2.key == 127 && d2.mods == TL_MOD_CTRL);
+	CHECK(d1.key != d2.key);
+	CHECK(kitty_rt(TL_KEY_I, TL_MOD_CTRL, TL_KEY_PRESS, &k_dis, &d1) &&
+		d1.key == 'i' && d1.mods == TL_MOD_CTRL);
+	CHECK(kitty_rt(TL_KEY_M, TL_MOD_CTRL, TL_KEY_PRESS, &k_dis, &d1) &&
+		d1.key == 'm' && d1.mods == TL_MOD_CTRL);
+	CHECK(kitty_rt(TL_KEY_A, TL_MOD_CTRL | TL_MOD_SHIFT, TL_KEY_PRESS,
+		&k_dis, &d1) && d1.key == 'a' &&
+		d1.mods == (TL_MOD_CTRL | TL_MOD_SHIFT));
+	CHECK(kitty_rt(TL_KEY_LEFTBRACE, TL_MOD_CTRL, TL_KEY_PRESS, &k_dis, &d1) &&
+		kitty_rt(TL_KEY_ESC, 0, TL_KEY_PRESS, &k_dis, &d2) &&
+		d1.key == '[' && d2.key == 27 && d1.key != d2.key);
+
+	/* Flag 2: event types (press, repeat, release). */
+	struct tl_key_modes k_ev = { false, false, false, false,
+		TL_KITTY_DISAMBIGUATE | TL_KITTY_EVENTS };
+	SENDS_EV(TL_KEY_A, TL_MOD_CTRL, TL_KEY_REPEAT, &k_ev, "\033[97;5:2u");
+	SENDS_EV(TL_KEY_A, TL_MOD_CTRL, TL_KEY_RELEASE, &k_ev, "\033[97;5:3u");
+	SENDS_EV(TL_KEY_UP, 0, TL_KEY_RELEASE, &k_ev, "\033[1;1:3A");
+	SENDS_EV(TL_KEY_DELETE, 0, TL_KEY_REPEAT, &k_ev, "\033[3;1:2~");
+	SENDS_EV(TL_KEY_ESC, 0, TL_KEY_RELEASE, &k_ev, "\033[27;1:3u");
+	/* Plain text release without ALL_KEYS sends nothing. */
+	SENDS_EV(TL_KEY_A, 0, TL_KEY_RELEASE, &k_ev, "");
+	SENDS_EV(TL_KEY_ENTER, 0, TL_KEY_RELEASE, &k_ev, "");
+
+	/* Flag 4: alternate (shifted) keys. */
+	struct tl_key_modes k_alt = { false, false, false, false,
+		TL_KITTY_DISAMBIGUATE | TL_KITTY_ALTERNATE };
+	SENDS(TL_KEY_A, TL_MOD_CTRL | TL_MOD_SHIFT, &k_alt, "\033[97:65;6u");
+	SENDS(TL_KEY_1, TL_MOD_CTRL | TL_MOD_SHIFT, &k_alt, "\033[49:33;6u");
+	SENDS(TL_KEY_A, TL_MOD_CTRL, &k_alt, "\033[97;5u");
+	SENDS(TL_KEY_SPACE, TL_MOD_CTRL | TL_MOD_SHIFT, &k_alt, "\033[32;6u");
+
+	/* Flag 8: all keys as escape codes (text, Enter/Tab/BS, modifiers). */
+	struct tl_key_modes k_all = { false, false, false, false,
+		TL_KITTY_ALL_KEYS | TL_KITTY_EVENTS };
+	SENDS_EV(TL_KEY_A, 0, TL_KEY_PRESS, &k_all, "\033[97u");
+	SENDS_EV(TL_KEY_A, 0, TL_KEY_RELEASE, &k_all, "\033[97;1:3u");
+	SENDS_EV(TL_KEY_A, TL_MOD_SHIFT, TL_KEY_PRESS, &k_all, "\033[97;2u");
+	SENDS_EV(TL_KEY_ENTER, 0, TL_KEY_PRESS, &k_all, "\033[13u");
+	SENDS_EV(TL_KEY_TAB, 0, TL_KEY_PRESS, &k_all, "\033[9u");
+	SENDS_EV(TL_KEY_BACKSPACE, 0, TL_KEY_PRESS, &k_all, "\033[127u");
+	SENDS_EV(TL_KEY_LEFTSHIFT, TL_MOD_SHIFT, TL_KEY_PRESS, &k_all,
+		"\033[57441;2u");
+	SENDS_EV(TL_KEY_LEFTSHIFT, 0, TL_KEY_RELEASE, &k_all, "\033[57441;1:3u");
+	SENDS_EV(TL_KEY_LEFTSHIFT, TL_MOD_SHIFT, TL_KEY_REPEAT, &k_all, "");
+	SENDS_EV(TL_KEY_CAPSLOCK, 0, TL_KEY_PRESS, &k_all, "\033[57358u");
+
+	/* Flag 16: associated text (with all 5 flags active). */
+	struct tl_key_modes k_full = { false, false, false, false,
+		TL_KITTY_MASK };
+	struct tl_key_modes k_full_caps = { false, false, false, true,
+		TL_KITTY_MASK };
+	struct tl_key_modes k_full_num = { false, false, true, false,
+		TL_KITTY_MASK };
+	SENDS_EV(TL_KEY_A, 0, TL_KEY_PRESS, &k_full, "\033[97;;97u");
+	SENDS_EV(TL_KEY_A, TL_MOD_SHIFT, TL_KEY_PRESS, &k_full,
+		"\033[97:65;2;65u");
+	SENDS_EV(TL_KEY_A, 0, TL_KEY_PRESS, &k_full_caps, "\033[97;65;65u");
+	SENDS_EV(TL_KEY_A, 0, TL_KEY_REPEAT, &k_full, "\033[97;1:2;97u");
+	SENDS_EV(TL_KEY_A, 0, TL_KEY_RELEASE, &k_full, "\033[97;1:3u");
+	SENDS_EV(TL_KEY_A, TL_MOD_CTRL, TL_KEY_PRESS, &k_full, "\033[97;5u");
+	SENDS_EV(TL_KEY_KP5, 0, TL_KEY_PRESS, &k_full_num, "\033[57404;129;53u");
+	CHECK(kitty_rt(TL_KEY_A, TL_MOD_SHIFT, TL_KEY_PRESS, &k_full, &d1) &&
+		d1.key == 'a' && d1.shifted == 'A' && d1.mods == TL_MOD_SHIFT &&
+		d1.ev == TL_KEY_PRESS && d1.text == 'A');
 
 	CHECK_DONE("test_keys");
 }

@@ -3,39 +3,34 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-22, with W8
+Updated: 2026-11-23, with W9
 
 
 STATE
 
-  Version 0.0.6 on branch dev (Phase P1 foundation complete; Fred
-  accepted 0.0.6 via sandbox/play on 2026-11-22). Implemented and
-  verified:
-  - Integer HiDPI fallback via wl_compositor v6
-    wl_surface.preferred_buffer_scale and wl_surface.set_buffer_scale
-    when fractional-scale-v1/viewporter is absent.
-  - Bold, italic, and bold-italic sibling faces auto-discovered from
-    the main font path (or overridden in config), plus TrueType (glyf)
-    fallback font chain for missing glyphs.
-  - Procedural Box Drawing (U+2500..U+257F), Block Elements
-    (U+2580..U+259F), and Braille Patterns (U+2800..U+28FF) in
-    src/font/box.c so lines and blocks join pixel-for-pixel.
-  - Configuration via libtam's tam_ini (~/.config/tam-last/tam-last.ini
-    or -c/--config) for font, sibling/fallback faces, size, pad,
-    include=, and [colors]/[colors-dark], defaulting to Tamlinux's dark
-    theme.
+  Version 0.1.0 on branch dev (Phase P2 started; Fred accepted 0.1.0
+  via sandbox/play on 2026-11-23, W9). Implemented and verified:
+  - Per-screen bounded kitty keyboard flags stack (16 entries) in
+    src/term.c: CSI ? u query, CSI > flags u push, CSI < n u pop,
+    CSI = flags ; mode u set/OR/clear, and reset on ESC c.
+  - All five progressive enhancement flags in src/keys/encode.c:
+    disambiguate (1), event types press/repeat/release (2), alternate
+    shifted keys (4), all keys as escape codes including modifiers (8),
+    and associated text (16), wired through src/main.c.
+  - Interactive sandbox/demo-kitty (option 7 in sandbox/play) to toggle
+    flags 1..16 and inspect raw sequences and decoded fields live.
 
-  make test (test_wire 116, test_vt 297, test_ttf 3036, test_keys 78,
-  test_render 62, test_config 38, version 0.0.5, headless tam-pane),
+  make test (test_wire 116, test_vt 318, test_ttf 3036, test_keys 139,
+  test_render 66, test_config 38, version 0.1.0, headless tam-pane),
   ASan/UBSan sanitize tests, and readelf -d (libc and libm only) all
   pass with zero warnings.
 
 
 NEXT
 
-  1. Phase P2, 0.1.0 (kitty keyboard protocol: progressive enhancement
-     flags, CSI u, release and repeat events, alternate keys, flags
-     stack; see plans/P2-key-path.md).
+  1. Phase P2, 0.1.1 (tam-last --keys: show evdev code/name, press or
+     release, held modifiers and locks, layout character, and exact
+     bytes written to the pty; see plans/P2-key-path.md).
 
 
 WAITING FOR FRED

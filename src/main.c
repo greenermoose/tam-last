@@ -213,13 +213,14 @@ static void draw(struct app *a, bool force)
 	a->term.dirty = false;
 }
 
-static void send_key(struct app *a, uint32_t code)
+static void send_key(struct app *a, uint32_t code, enum tl_key_event ev)
 {
 	struct tl_key_modes m = {
 		a->term.app_cursor, a->term.app_keypad, a->kbd.num, a->kbd.caps,
+		tl_term_kitty_kbd_flags(&a->term),
 	};
 	char seq[TL_KEY_SEQ_MAX];
-	size_t n = tl_key_encode(code, tl_kbd_mods(&a->kbd), &m, seq);
+	size_t n = tl_key_encode_event(code, tl_kbd_mods(&a->kbd), ev, &m, seq);
 	if (n > 0)
 		(void)tl_pty_queue(&a->pty, seq, n);
 }
@@ -460,6 +461,8 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 	if (!pressed) {
 		if (code == a->repeat_code)
 			a->repeat_code = 0;
+		if (tl_term_kitty_kbd_flags(&a->term) & TL_KITTY_EVENTS)
+			send_key(a, code, TL_KEY_RELEASE);
 		return;
 	}
 	unsigned mods = tl_kbd_mods(&a->kbd);
@@ -494,7 +497,7 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 	}
 	if (!tl_key_is_modifier(code))
 		tl_term_reset_view(&a->term);
-	send_key(a, code);
+	send_key(a, code, TL_KEY_PRESS);
 	if (!tl_key_is_modifier(code) && a->repeat_rate > 0) {
 		a->repeat_code = code;
 		clock_gettime(CLOCK_MONOTONIC, &a->repeat_at);
@@ -865,7 +868,7 @@ int main(int argc, char **argv)
 
 		if (a.repeat_code != 0 && a.focused &&
 		    ms_until(&a.repeat_at) == 0) {
-			send_key(&a, a.repeat_code);
+			send_key(&a, a.repeat_code, TL_KEY_REPEAT);
 			ts_add_ms(&a.repeat_at, 1000 / a.repeat_rate);
 		}
 

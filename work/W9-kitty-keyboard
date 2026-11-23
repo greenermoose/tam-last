@@ -1,0 +1,57 @@
+W9 KITTY KEYBOARD PROTOCOL (0.1.0)
+
+Date: 2026-11-23
+AI harness: agy 1.5.15
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice for tam-last"
+  Fred: "Approved. Proceed."
+  Fred: "7 kitty keys just flashes. Am I supposed to see something more interesting?"
+  Fred: "Ctrl + Q did not quit the kitty keyboard protocol tester"
+  Fred: "pass. commit and finish"
+
+
+DONE
+
+  - Added per-screen bounded kitty keyboard flags stacks
+    (TL_KITTY_KBD_STACK_MAX = 16) in include/tam-last/term.h and
+    src/term.c, handling CSI ? u (query), CSI > flags u (push with
+    oldest-entry eviction when full), CSI < n u (pop, default 1),
+    CSI = flags ; mode u (modes 1 replace, 2 OR, 3 clear), and full
+    reset on RIS (ESC c).
+  - Implemented all five progressive enhancement flags in
+    include/tam-last/keys.h and src/keys/encode.c: disambiguate (1),
+    event types press/repeat/release (2), alternate shifted keys (4),
+    all keys as escape codes including modifiers/locks (8), and
+    associated text (16). Distinct PUA codes for keypad and modifier
+    keys; F3 uses CSI 13 ~ under disambiguate to avoid CPR collision.
+  - Wired active screen flags and press/repeat/release events through
+    src/main.c.
+  - Expanded tests/test_vt.c (318 checks) and tests/test_keys.c (139
+    checks, including a kitty-aware round-trip decoder verifying every
+    legacy loss is distinct under disambiguate).
+  - Added interactive sandbox/demo-kitty (fixed heredoc ENOTTY via
+    exec python3 -c and structural CSI parsing so Ctrl+Q and F1..F5
+    work with NumLock/CapsLock active) and wired it into sandbox/play
+    and sandbox/README-sandbox; bumped VERSION to 0.1.0 and updated
+    plans/P2-key-path.md.
+  - Verified make clean && make (zero warnings), make test, make
+    sanitize (ASan/UBSan + headless tam-pane), readelf -d (libc and
+    libm only), sh -n, PTY smoke test, and tam-idol/tools/idol-check.
+  - Fred tested and accepted tam-last 0.1.0 on 2026-11-23.
+
+
+FAILED
+
+  - First draft of sandbox/demo-kitty used a stdin heredoc (ENOTTY on
+    termios.tcgetattr) and literal Ctrl+Q/F1..F5 byte matching that
+    missed NumLock (+128) modifier bits; both fixed and re-verified.
+
+
+HANDOFF
+
+  - Fred accepted 0.1.0 (kitty keyboard protocol) on 2026-11-23.
+  - Next milestone is Phase P2, 0.1.1 (tam-last --keys trace mode).

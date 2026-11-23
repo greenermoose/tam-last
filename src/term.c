@@ -161,6 +161,9 @@ static void reset(struct tl_term *t)
 	t->mouse_mode = TL_MOUSE_NONE;
 	t->mouse_sgr = false;
 	t->bracketed_paste = false;
+	memset(t->kitty_kbd, 0, sizeof(t->kitty_kbd));
+	t->kitty_kbd_top[0] = 0;
+	t->kitty_kbd_top[1] = 0;
 	t->saved = (struct tl_saved){ 0, 0, false, false, false, t->pen };
 	t->alt_saved = t->saved;
 	fill_rows(t, 0, t->rows);
@@ -720,6 +723,49 @@ static void ansi_mode(struct tl_term *t, const struct tl_csi *c, bool on)
 	}
 }
 
+static void kitty_kbd_csi(struct tl_term *t, const struct tl_csi *c)
+{
+	int scr = t->alt_screen ? 1 : 0;
+	uint8_t *stack = t->kitty_kbd[scr];
+	int *top = &t->kitty_kbd_top[scr];
+
+	if (c->priv == '?') {
+		char buf[24];
+		snprintf(buf, sizeof(buf), "\033[?%uu", (unsigned)stack[*top]);
+		reply(t, buf);
+		return;
+	}
+	if (c->priv == '>') {
+		uint8_t flags = (uint8_t)((c->n > 0 ? c->p[0] : 0) & 0x1f);
+		if (*top + 1 < TL_KITTY_KBD_STACK_MAX)
+			(*top)++;
+		else
+			memmove(stack, stack + 1, TL_KITTY_KBD_STACK_MAX - 1);
+		stack[*top] = flags;
+		return;
+	}
+	if (c->priv == '<') {
+		int pop = arg(c, 0, 1);
+		if (pop >= *top) {
+			*top = 0;
+			stack[0] = 0;
+		} else {
+			*top -= pop;
+		}
+		return;
+	}
+	if (c->priv == '=') {
+		uint8_t flags = (uint8_t)((c->n > 0 ? c->p[0] : 0) & 0x1f);
+		int mode = arg(c, 1, 1);
+		if (mode == 1)
+			stack[*top] = flags;
+		else if (mode == 2)
+			stack[*top] |= flags;
+		else if (mode == 3)
+			stack[*top] &= (uint8_t)~flags;
+	}
+}
+
 void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 {
 	char buf[48];
@@ -729,6 +775,13 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 			dec_mode(t, c, true);
 		else if (c->inter == 0 && c->final == 'l')
 			dec_mode(t, c, false);
+		else if (c->inter == 0 && c->final == 'u')
+			kitty_kbd_csi(t, c);
+		return;
+	}
+	if (c->priv == '>' || c->priv == '<' || c->priv == '=') {
+		if (c->inter == 0 && c->final == 'u')
+			kitty_kbd_csi(t, c);
 		return;
 	}
 	if (c->priv != 0)
@@ -861,6 +914,12 @@ void tl_term_csi(struct tl_term *t, const struct tl_csi *c)
 void tl_term_feed(struct tl_term *t, const void *data, size_t len)
 {
 	tl_vt_feed(&t->vt, t, data, len);
+}
+
+unsigned tl_term_kitty_kbd_flags(const struct tl_term *t)
+{
+	int scr = t->alt_screen ? 1 : 0;
+	return t->kitty_kbd[scr][t->kitty_kbd_top[scr]];
 }
 
 void tl_term_scroll_view(struct tl_term *t, int delta)

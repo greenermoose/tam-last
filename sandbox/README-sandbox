@@ -32,6 +32,8 @@ IN THIS REPOSITORY
                                styles, DEC line-drawing, combining marks
     ./sandbox/demo-config      0.0.5: launches tam-last with the
                                throwaway sandbox/theme-gruvbox.ini
+    ./sandbox/demo-kitty       0.1.0: interactive kitty keyboard protocol
+                               viewer (toggle flags 1..16 with F1..F5)
     sandbox/theme-gruvbox.ini  sample tam_ini config (Gruvbox, 11 pt)
 
   Pass --in-term to any demo script to run it in the current terminal

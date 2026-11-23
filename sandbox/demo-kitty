@@ -1,0 +1,162 @@
+#!/bin/sh
+# Interactive demo for tam-last 0.1.0: kitty keyboard protocol.
+# Queries CSI ? u, pushes progressive enhancement flags, and shows every
+# raw sequence and decoded key/modifier/event/text in real time.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+if ! [ -t 0 ]; then
+	printf 'demo-kitty needs a terminal.\n' >&2
+	exit 1
+fi
+
+exec python3 -c '
+import os, re, select, sys, termios, tty
+
+fd = sys.stdin.fileno()
+old = termios.tcgetattr(fd)
+
+FLAG_NAMES = [
+    (1, "disambiguate"),
+    (2, "events"),
+    (4, "alternate"),
+    (8, "all-keys"),
+    (16, "text"),
+]
+
+SEQ_RE = re.compile(rb"\x1b\[[0-9;:]*[A-Za-z~]|\x1bO[A-Za-z]|.", re.DOTALL)
+
+def write(s):
+    os.write(sys.stdout.fileno(), s.encode("utf-8"))
+
+def read_reply(timeout=0.3):
+    buf = b""
+    while select.select([fd], [], [], timeout)[0]:
+        chunk = os.read(fd, 64)
+        if not chunk:
+            break
+        buf += chunk
+        if buf.endswith(b"u"):
+            break
+        timeout = 0.05
+    return buf
+
+def fmt_raw(b):
+    out = []
+    for c in b:
+        if c == 0x1b:
+            out.append("ESC")
+        elif 32 <= c < 127:
+            out.append(chr(c))
+        else:
+            out.append(f"\\x{c:02x}")
+    return "".join(out)
+
+def describe_mods(bits):
+    names = []
+    for bit, name in [(1,"Shift"),(2,"Alt"),(4,"Ctrl"),(8,"Super"),(64,"Caps"),(128,"Num")]:
+        if bits & bit:
+            names.append(name)
+    return "+".join(names) if names else "-"
+
+def parse_kitty(b):
+    if len(b) >= 3 and b[:2] == b"\x1b[" and b[-1:] in (b"u", b"~", b"A", b"B", b"C", b"D", b"H", b"F", b"P", b"Q", b"R", b"S"):
+        body = b[2:-1].decode("ascii", "replace")
+        final = chr(b[-1])
+        parts = body.split(";") if body else []
+        key_part = parts[0] if len(parts) > 0 else ""
+        mod_part = parts[1] if len(parts) > 1 else ""
+        txt_part = parts[2] if len(parts) > 2 else ""
+        key_num = key_part.split(":")[0] if key_part else ""
+        bits = 0
+        ev = 1
+        if mod_part:
+            mp = mod_part.split(":")
+            if mp[0].isdigit() and int(mp[0]) >= 1:
+                bits = int(mp[0]) - 1
+            if len(mp) > 1 and mp[1].isdigit():
+                ev = int(mp[1])
+        return (final, key_part, key_num, bits, ev, txt_part)
+    return None
+
+def decode_kitty(b):
+    p = parse_kitty(b)
+    if p is None:
+        return "legacy/plain"
+    final, key_part, _key_num, bits, ev, txt_part = p
+    ev_names = {1: "press", 2: "repeat", 3: "release"}
+    ev_s = ev_names.get(ev, str(ev))
+    txt = ""
+    if txt_part and txt_part.isdigit():
+        txt = f" text={chr(int(txt_part))!r}"
+    key_s = key_part or "-"
+    return f"final={final} key={key_s} mods={describe_mods(bits)} ev={ev_s}{txt}"
+
+flags = 1
+try:
+    tty.setraw(fd)
+    write("\033[2J\033[H")
+    write("\033[?u")
+    initial = read_reply()
+    write(f"\033[>{flags}u")
+
+    def header():
+        active = ",".join(n for b, n in FLAG_NAMES if flags & b) or "none"
+        write("\033[2J\033[H")
+        write("\033[1;36m=== tam-last 0.1.0: Kitty Keyboard Protocol ===\033[0m\r\n")
+        init_s = fmt_raw(initial) or "(none)"
+        write(f"Initial CSI ? u reply: {init_s}\r\n")
+        write(f"Active flags: \033[1;33m{flags}\033[0m ({active})\r\n")
+        write("Toggle flags: F1=disambig(1) F2=events(2) F3=alt(4) F4=all(8) F5=text(16)\r\n")
+        write("Try: Ctrl+H, Ctrl+I, Ctrl+M, Ctrl+Shift+A, Ctrl+Backspace, Esc, Shift, Keypad\r\n")
+        write("Press \033[1mCtrl+Q\033[0m to quit.\r\n\r\n")
+
+    header()
+    running = True
+    while running:
+        r, _, _ = select.select([fd], [], [])
+        if not r:
+            continue
+        data = os.read(fd, 256)
+        if not data:
+            break
+        for tok in SEQ_RE.findall(data):
+            if tok == b"\x11":
+                running = False
+                break
+            p = parse_kitty(tok)
+            if p is not None:
+                final, _kp, key_num, bits, ev, _tp = p
+                non_lock = bits & 15
+                if ev == 1 and final == "u" and key_num == "113" and non_lock == 4:
+                    running = False
+                    break
+                if ev == 1 and non_lock == 0:
+                    bit = 0
+                    if final == "P" and key_num in ("", "1"): bit = 1
+                    elif final == "Q" and key_num in ("", "1"): bit = 2
+                    elif (final == "~" and key_num == "13") or (final == "R" and key_num in ("", "1")): bit = 4
+                    elif final == "S" and key_num in ("", "1"): bit = 8
+                    elif final == "~" and key_num == "15": bit = 16
+                    if bit:
+                        flags ^= bit
+                        write(f"\033[={flags};1u")
+                        header()
+                        continue
+            elif tok in (b"\x1bOP", b"\x1bOQ", b"\x1bOR", b"\x1bOS"):
+                bit = {b"\x1bOP": 1, b"\x1bOQ": 2, b"\x1bOR": 4, b"\x1bOS": 8}[tok]
+                flags ^= bit
+                write(f"\033[={flags};1u")
+                header()
+                continue
+            write(f"  {fmt_raw(tok):26s}  ->  {decode_kitty(tok)}\r\n")
+finally:
+    write("\033[<u")
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    write("\r\n")
+'
