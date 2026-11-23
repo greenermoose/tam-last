@@ -39,7 +39,7 @@ COMPOSE_SRC = layouts/compose
 # Everything but main.c, so the unit tests can link it.
 CORE_SRCS = src/wl/conn.c src/wl/proto.c src/window.c src/shm.c \
 	src/font/ttf.c src/font/raster.c src/font/box.c src/font/font.c \
-	src/config.c src/vt.c src/term.c src/select.c src/render.c \
+	src/config.c src/vt.c src/osc.c src/term.c src/select.c src/render.c \
 	src/keys/keymap.c src/keys/compose.c src/keys/encode.c \
 	src/keys/trace.c src/pty.c
 CORE_OBJS = $(patsubst src/%.c,$(B)/%.o,$(CORE_SRCS)) $(B)/keys/layouts_gen.o

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "check.h"
+#include "tam-last/osc.h"
 #include "tam-last/select.h"
 #include "tam-last/term.h"
 
@@ -360,6 +361,211 @@ int main(void)
 	feed("\033[?1049h");
 	CHECK(tl_term_kitty_kbd_flags(&t) == 0);
 	feed("\033[?1049l");
+
+	/* --- OSC 0 & 2: window titles --- */
+	fresh(20, 4);
+	CHECK(t.title[0] == '\0' && !t.title_dirty);
+	feed("\033]0;Hello World\007");
+	CHECK(strcmp(t.title, "Hello World") == 0 && t.title_dirty);
+	t.title_dirty = false;
+	/* ST terminator, UTF-8, and control character stripping. */
+	feed("\033]2;caf\xc3\xa9\x01\x7f!\033\\");
+	CHECK(strcmp(t.title, "caf\xc3\xa9!") == 0 && t.title_dirty);
+	/* Empty title resets to empty string (host falls back to default). */
+	t.title_dirty = false;
+	feed("\033]2;\033\\");
+	CHECK(t.title[0] == '\0' && t.title_dirty);
+	/* RIS resets title. */
+	feed("\033]0;Temp\007");
+	CHECK(strcmp(t.title, "Temp") == 0);
+	feed("\033c");
+	CHECK(t.title[0] == '\0' && t.title_dirty);
+
+	/* --- OSC 7: working directory --- */
+	fresh(20, 4);
+	CHECK(t.cwd == NULL);
+	feed("\033]7;file:///home/fred/my%20dir\033\\");
+	CHECK(t.cwd != NULL && strcmp(t.cwd, "/home/fred/my dir") == 0);
+	feed("\033]7;FILE://localhost/tmp/sub%2Fdir\007");
+	CHECK(t.cwd != NULL && strcmp(t.cwd, "/tmp/sub/dir") == 0);
+	/* Remote hostname is rejected (keeps previous cwd). */
+	feed("\033]7;file://definitely-remote-host.invalid/etc\033\\");
+	CHECK(t.cwd != NULL && strcmp(t.cwd, "/tmp/sub/dir") == 0);
+	/* NUL byte (%00), bad percent escape, and non-file scheme rejected. */
+	feed("\033]7;file:///tmp/bad%00path\033\\");
+	CHECK(strcmp(t.cwd, "/tmp/sub/dir") == 0);
+	feed("\033]7;file:///tmp/bad%ZZ\033\\");
+	CHECK(strcmp(t.cwd, "/tmp/sub/dir") == 0);
+	feed("\033]7;https://example.com/path\033\\");
+	CHECK(strcmp(t.cwd, "/tmp/sub/dir") == 0);
+	/* Local hostname matches t.hostname. */
+	if (t.hostname[0] != '\0') {
+		char seq[320];
+		snprintf(seq, sizeof(seq), "\033]7;file://%s/var/log\033\\",
+			t.hostname);
+		feed(seq);
+		CHECK(strcmp(t.cwd, "/var/log") == 0);
+	}
+	/* Empty OSC 7 clears cwd. */
+	feed("\033]7;\033\\");
+	CHECK(t.cwd == NULL);
+
+	/* --- OSC 8: hyperlinks --- */
+	fresh(20, 3);
+	feed("\033]8;id=doc1;https://tamlinux.org\033\\\033[31mhi\033[0m!\033]8;;\033\\ plain");
+	uint32_t lid0 = tl_term_cell(&t, 0, 0)->link_id;
+	CHECK(lid0 != 0);
+	CHECK(tl_term_cell(&t, 1, 0)->link_id == lid0);
+	/* SGR 0 must NOT close the hyperlink. */
+	CHECK(tl_term_cell(&t, 2, 0)->link_id == lid0);
+	CHECK(tl_term_cell(&t, 3, 0)->link_id == 0);
+	CHECK(strcmp(tl_term_link_uri(&t, 0, 0), "https://tamlinux.org") == 0);
+	CHECK(tl_term_link_uri(&t, 4, 0) == NULL);
+	/* Reusing the same id= and uri reuses the same link_id. */
+	feed("\033]8;foo=bar:id=doc1;https://tamlinux.org\007X\033]8;;\007");
+	CHECK(tl_term_cell(&t, 9, 0)->link_id == lid0);
+	/* Wide char gets link_id on both head and tail. */
+	feed("\033]8;;https://wide.test\033\\\xe6\xbc\xa2\033]8;;\033\\");
+	CHECK(tl_term_cell(&t, 10, 0)->link_id != 0 &&
+		tl_term_cell(&t, 10, 0)->link_id == tl_term_cell(&t, 11, 0)->link_id);
+	/* Link survives scrolling into scrollback. */
+	feed("\r\nl1\r\nl2\r\nl3");
+	CHECK(t.sb_len == 1);
+	CHECK(strcmp(tl_term_link_uri(&t, 0, 0), "https://tamlinux.org") == 0);
+	/* Evicting more than TL_LINK_MAX links makes old link_id resolve to NULL safely. */
+	for (int i = 0; i < TL_LINK_MAX + 10; i++) {
+		char seq[64];
+		snprintf(seq, sizeof(seq), "\033]8;;https://ex/%d\033\\a\033]8;;\033\\", i);
+		feed(seq);
+	}
+	CHECK(tl_term_link(&t, lid0) == NULL);
+
+	/* --- OSC 52: clipboard & base64 with policy --- */
+	{
+		char *enc = NULL, *dec = NULL;
+		size_t elen = 0, dlen = 0;
+		CHECK(tl_base64_encode("hello!", 6, &enc, &elen) == 0);
+		CHECK(elen == 8 && strcmp(enc, "aGVsbG8h") == 0);
+		CHECK(tl_base64_decode("aGVs\n bG8h", 10, &dec, &dlen) == 0);
+		CHECK(dlen == 6 && memcmp(dec, "hello!", 6) == 0);
+		free(enc);
+		free(dec);
+		/* Invalid base64 rejected. */
+		CHECK(tl_base64_decode("!!!", 3, &dec, &dlen) == -1);
+		CHECK(tl_base64_decode("abc=d", 5, &dec, &dlen) == -1);
+	}
+	fresh(20, 4);
+	/* Default policy is TL_OSC52_WRITE: write allowed, read denied. */
+	CHECK(t.osc52_policy == TL_OSC52_WRITE);
+	feed("\033]52;c;aGVsbG8=\033\\");
+	CHECK(t.osc52_write_pending && t.osc52_write_clip && !t.osc52_write_prim);
+	CHECK(t.osc52_write_len == 5 && memcmp(t.osc52_write_data, "hello", 5) == 0);
+	tl_term_osc52_clear_write(&t);
+	/* Empty target defaults to clipboard; empty data clears clipboard. */
+	feed("\033]52;;\007");
+	CHECK(t.osc52_write_pending && t.osc52_write_clip && t.osc52_write_len == 0);
+	tl_term_osc52_clear_write(&t);
+	/* Read query '?' denied under default write-only policy. */
+	feed("\033]52;c;?\033\\");
+	CHECK(!t.osc52_read_pending);
+	/* Disabled policy denies both write and read. */
+	tl_term_set_osc52_policy(&t, TL_OSC52_DISABLED);
+	feed("\033]52;c;aGVsbG8=\033\\");
+	feed("\033]52;c;?\033\\");
+	CHECK(!t.osc52_write_pending && !t.osc52_read_pending);
+	/* Read-only policy allows '?' and denies write. */
+	tl_term_set_osc52_policy(&t, TL_OSC52_READ);
+	feed("\033]52;c;aGVsbG8=\033\\");
+	CHECK(!t.osc52_write_pending);
+	feed("\033]52;p;?\007");
+	CHECK(t.osc52_read_pending && t.osc52_read_prim && !t.osc52_read_st &&
+		strcmp(t.osc52_read_target, "p") == 0);
+	t.osc52_read_pending = false;
+	/* Both policy allows both write and ST-terminated read. */
+	tl_term_set_osc52_policy(&t, TL_OSC52_BOTH);
+	feed("\033]52;pc;b2s=\033\\");
+	CHECK(t.osc52_write_pending && t.osc52_write_clip && t.osc52_write_prim &&
+		t.osc52_write_len == 2 && memcmp(t.osc52_write_data, "ok", 2) == 0);
+	tl_term_osc52_clear_write(&t);
+	feed("\033]52;;?\033\\");
+	CHECK(t.osc52_read_pending && !t.osc52_read_prim && t.osc52_read_st &&
+		strcmp(t.osc52_read_target, "c") == 0);
+	t.osc52_read_pending = false;
+
+	/* --- OSC 4, 10, 11, 12, 104, 110, 111, 112: colors --- */
+	{
+		uint32_t c = 0;
+		CHECK(tl_osc_parse_color("rgb:f/0/a", 9, &c) == 0 && c == 0xff00aa);
+		CHECK(tl_osc_parse_color("rgb:12/34/56", 12, &c) == 0 && c == 0x123456);
+		CHECK(tl_osc_parse_color("rgb:abc/def/123", 15, &c) == 0 && c == 0xabde12);
+		CHECK(tl_osc_parse_color("rgb:1234/5678/9abc", 18, &c) == 0 && c == 0x12569a);
+		CHECK(tl_osc_parse_color("#f80", 4, &c) == 0 && c == 0xff8800);
+		CHECK(tl_osc_parse_color("#112233", 7, &c) == 0 && c == 0x112233);
+		CHECK(tl_osc_parse_color("#123456789", 10, &c) == 0 && c == 0x124578);
+		CHECK(tl_osc_parse_color("#aabbccddeeff", 13, &c) == 0 && c == 0xaaccee);
+		CHECK(tl_osc_parse_color("rgb:12/34", 9, &c) == -1);
+		CHECK(tl_osc_parse_color("#12345", 6, &c) == -1);
+	}
+	fresh(20, 4);
+	struct tl_palette custom;
+	tl_palette_default(&custom);
+	custom.fg = 0x102030;
+	custom.bg = 0x010203;
+	custom.cursor = 0xabcdef;
+	custom.index[2] = 0x445566;
+	tl_term_set_palette(&t, &custom);
+	t.reply_len = 0;
+	/* Query fg (10) with ST and bg (11) with BEL. */
+	feed("\033]10;?\033\\\033]11;?\007");
+	const char *want_q =
+		"\033]10;rgb:1010/2020/3030\033\\"
+		"\033]11;rgb:0101/0202/0303\007";
+	CHECK(t.reply_len == strlen(want_q) &&
+		memcmp(t.reply, want_q, t.reply_len) == 0);
+	t.reply_len = 0;
+	/* Multi-spec OSC 10 sets fg, bg, cursor at once. */
+	feed("\033]10;#aabbcc;rgb:11/22/33;#0f0\033\\");
+	CHECK(t.pal.fg == 0xaabbcc && t.pal.bg == 0x112233 && t.pal.cursor == 0x00ff00);
+	/* Multi-pair OSC 4 sets index 2 and queries index 2. */
+	feed("\033]4;2;rgb:de/ad/be;2;?\033\\");
+	CHECK(t.pal.index[2] == 0xdeadbe);
+	const char *want_4 = "\033]4;2;rgb:dede/adad/bebe\033\\";
+	CHECK(t.reply_len == strlen(want_4) &&
+		memcmp(t.reply, want_4, t.reply_len) == 0);
+	t.reply_len = 0;
+	/* OSC 104 resets single index or all indices to configured default_pal. */
+	feed("\033]4;5;#ffffff\033\\");
+	CHECK(t.pal.index[5] == 0xffffff);
+	feed("\033]104;2\033\\");
+	CHECK(t.pal.index[2] == 0x445566 && t.pal.index[5] == 0xffffff);
+	feed("\033]104\033\\");
+	CHECK(t.pal.index[5] == custom.index[5]);
+	/* OSC 110/111/112 reset fg/bg/cursor to configured default_pal. */
+	feed("\033]110\033\\\033]111\033\\\033]112\033\\");
+	CHECK(t.pal.fg == 0x102030 && t.pal.bg == 0x010203 && t.pal.cursor == 0xabcdef);
+
+	/* --- VT OSC parser edge cases --- */
+	fresh(20, 4);
+	/* Split across single-byte feeds. */
+	const char *split_osc = "\033]2;split\033\\";
+	for (size_t i = 0; split_osc[i] != '\0'; i++)
+		tl_term_feed(&t, split_osc + i, 1);
+	CHECK(strcmp(t.title, "split") == 0);
+	/* ESC followed by '[' inside OSC aborts OSC and executes the CSI. */
+	feed("\033]2;aborted\033[2;3HZ");
+	CHECK(strcmp(t.title, "split") == 0);
+	CHECK(tl_term_cell(&t, 2, 1)->cp == 'Z');
+	/* CAN (0x18) aborts OSC. */
+	feed("\033]2;never\x18ok");
+	CHECK(strcmp(t.title, "split") == 0);
+	/* Oversized OSC (> TL_VT_OSC_MAX) is ignored cleanly without crashing. */
+	feed("\033]2;");
+	char big[4096];
+	memset(big, 'A', sizeof(big));
+	for (size_t sent = 0; sent < TL_VT_OSC_MAX + 8192; sent += sizeof(big))
+		tl_term_feed(&t, big, sizeof(big));
+	feed("\007");
+	CHECK(strcmp(t.title, "split") == 0);
 
 	/* Garbage never breaks the invariants. */
 	srand(1);

@@ -895,6 +895,13 @@ bool tl_window_frame_pending(const struct tl_window *win)
 	return win->frame_cb != 0;
 }
 
+void tl_window_set_title(struct tl_window *win, const char *title)
+{
+	if (win->toplevel == 0 || title == NULL)
+		return;
+	tl_toplevel_set_title(&win->wire, win->toplevel, title);
+}
+
 void tl_window_set_cursor(struct tl_window *win, uint32_t shape)
 {
 	if (win->cursor_shape == shape)

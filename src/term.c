@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <tam_uni.h>
 
@@ -14,7 +15,7 @@
 static struct tl_cell blank(const struct tl_term *t)
 {
 	/* Erasing uses the current background (xterm's bce). */
-	return (struct tl_cell){ ' ', { 0, 0 }, TL_COLOR_DEFAULT, t->pen.bg, 0, 0 };
+	return (struct tl_cell){ ' ', { 0, 0 }, TL_COLOR_DEFAULT, t->pen.bg, 0, 0, 0 };
 }
 
 static void mark_row(struct tl_term *t, int y)
@@ -68,7 +69,7 @@ static void fill_rows(struct tl_term *t, int y0, int y1)
 
 static void clear_grid(struct tl_cell *cells, int cols, int rows)
 {
-	struct tl_cell b = { ' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0 };
+	struct tl_cell b = { ' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0, 0 };
 	size_t n = (size_t)cols * (size_t)rows;
 	for (size_t i = 0; i < n; i++)
 		cells[i] = b;
@@ -136,6 +137,19 @@ static void sb_push_row(struct tl_term *t, const struct tl_cell *row)
 		t->view_offset = t->sb_len;
 }
 
+static void links_clear(struct tl_term *t)
+{
+	for (size_t i = 0; i < TL_LINK_MAX; i++) {
+		free(t->links[i].uri);
+		free(t->links[i].user_id);
+		t->links[i].id = 0;
+		t->links[i].uri = NULL;
+		t->links[i].user_id = NULL;
+	}
+	t->link_cursor = 0;
+	t->hover_link_id = 0;
+}
+
 static void reset(struct tl_term *t)
 {
 	if (t->alt_screen) {
@@ -145,7 +159,15 @@ static void reset(struct tl_term *t)
 		t->alt_screen = false;
 	}
 	sb_clear(t);
-	t->pen = (struct tl_pen){ TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0 };
+	links_clear(t);
+	free(t->cwd);
+	t->cwd = NULL;
+	t->title[0] = '\0';
+	t->title_dirty = true;
+	tl_term_osc52_clear_write(t);
+	t->osc52_read_pending = false;
+	t->pal = t->default_pal;
+	t->pen = (struct tl_pen){ TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0 };
 	t->cx = t->cy = 0;
 	t->scroll_top = 0;
 	t->scroll_bottom = t->rows - 1;
@@ -187,14 +209,28 @@ int tl_term_init(struct tl_term *t, int cols, int rows)
 	}
 	t->cols = cols;
 	t->rows = rows;
+	t->next_link_id = 1;
+	t->osc52_policy = TL_OSC52_WRITE;
+	tl_palette_default(&t->default_pal);
+	t->pal = t->default_pal;
+	if (gethostname(t->hostname, sizeof(t->hostname) - 1) == 0)
+		t->hostname[sizeof(t->hostname) - 1] = '\0';
+	else
+		t->hostname[0] = '\0';
 	tl_vt_init(&t->vt);
 	reset(t);
+	t->title_dirty = false;
 	return 0;
 }
 
 void tl_term_free(struct tl_term *t)
 {
+	tl_vt_free(&t->vt);
 	sb_clear(t);
+	links_clear(t);
+	free(t->cwd);
+	t->cwd = NULL;
+	tl_term_osc52_clear_write(t);
 	free(t->cells);
 	free(t->alt_cells);
 	free(t->dirty_rows);
@@ -210,7 +246,7 @@ static struct tl_cell *resize_grid(const struct tl_cell *old, int old_cols,
 		sizeof(*cells));
 	if (cells == NULL)
 		return NULL;
-	struct tl_cell b = { ' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0 };
+	struct tl_cell b = { ' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0, 0 };
 	for (int y = 0; y < new_rows; y++) {
 		for (int x = 0; x < new_cols; x++) {
 			int oy = y + skip;
@@ -441,7 +477,10 @@ void tl_term_print(struct tl_term *t, uint32_t cp)
 		shift_cells(t, w, true);
 	unwide(t, t->cx, t->cy);
 	struct tl_cell *c = tl_term_cell(t, t->cx, t->cy);
-	*c = (struct tl_cell){ cp, { 0, 0 }, t->pen.fg, t->pen.bg, t->pen.attrs, 0 };
+	*c = (struct tl_cell){
+		cp, { 0, 0 }, t->pen.fg, t->pen.bg, t->pen.attrs, 0,
+		t->pen.link_id
+	};
 	if (w == 2) {
 		unwide(t, t->cx + 1, t->cy);
 		c[1] = *c;
@@ -487,13 +526,22 @@ void tl_term_control(struct tl_term *t, unsigned char c)
 	mark_row(t, t->cy);
 }
 
+void tl_term_reply(struct tl_term *t, const void *data, size_t len)
+{
+	if (t->reply_len + len <= sizeof(t->reply)) {
+		memcpy(t->reply + t->reply_len, data, len);
+		t->reply_len += len;
+	}
+}
+
+void tl_term_mark_all(struct tl_term *t)
+{
+	mark_all(t);
+}
+
 static void reply(struct tl_term *t, const char *s)
 {
-	size_t n = strlen(s);
-	if (t->reply_len + n <= sizeof(t->reply)) {
-		memcpy(t->reply + t->reply_len, s, n);
-		t->reply_len += n;
-	}
+	tl_term_reply(t, s, strlen(s));
 }
 
 static void save_cursor(struct tl_term *t)
@@ -598,7 +646,8 @@ static void sgr(struct tl_term *t, const struct tl_csi *c)
 {
 	struct tl_pen *p = &t->pen;
 	if (c->n == 0) {
-		*p = (struct tl_pen){ 0, 0, 0 };
+		uint32_t lid = p->link_id;
+		*p = (struct tl_pen){ 0, 0, 0, lid };
 		return;
 	}
 	for (int i = 0; i < c->n; i++) {
@@ -606,7 +655,11 @@ static void sgr(struct tl_term *t, const struct tl_csi *c)
 		if (i > 0 && c->sub[i])
 			continue; /* sub-parameters we do not use (4:3 curly) */
 		switch (v) {
-		case 0: *p = (struct tl_pen){ 0, 0, 0 }; break;
+		case 0: {
+			uint32_t lid = p->link_id;
+			*p = (struct tl_pen){ 0, 0, 0, lid };
+			break;
+		}
 		case 1: p->attrs |= TL_ATTR_BOLD; break;
 		case 2: p->attrs |= TL_ATTR_DIM; break;
 		case 3: p->attrs |= TL_ATTR_ITALIC; break;
@@ -920,6 +973,51 @@ unsigned tl_term_kitty_kbd_flags(const struct tl_term *t)
 {
 	int scr = t->alt_screen ? 1 : 0;
 	return t->kitty_kbd[scr][t->kitty_kbd_top[scr]];
+}
+
+void tl_term_set_palette(struct tl_term *t, const struct tl_palette *pal)
+{
+	if (pal == NULL)
+		return;
+	t->default_pal = *pal;
+	t->pal = *pal;
+	mark_all(t);
+}
+
+void tl_term_set_osc52_policy(struct tl_term *t, enum tl_osc52_policy policy)
+{
+	t->osc52_policy = policy;
+}
+
+void tl_term_osc52_clear_write(struct tl_term *t)
+{
+	free(t->osc52_write_data);
+	t->osc52_write_data = NULL;
+	t->osc52_write_len = 0;
+	t->osc52_write_pending = false;
+	t->osc52_write_clip = false;
+	t->osc52_write_prim = false;
+}
+
+const struct tl_link *tl_term_link(const struct tl_term *t, uint32_t link_id)
+{
+	if (link_id == 0)
+		return NULL;
+	for (size_t i = 0; i < TL_LINK_MAX; i++) {
+		if (t->links[i].id == link_id)
+			return &t->links[i];
+	}
+	return NULL;
+}
+
+const char *tl_term_link_uri(const struct tl_term *t, int x, int abs_y)
+{
+	int row_cols = 0;
+	const struct tl_cell *row = tl_term_abs_row(t, abs_y, &row_cols);
+	if (row == NULL || x < 0 || x >= row_cols)
+		return NULL;
+	const struct tl_link *l = tl_term_link(t, row[x].link_id);
+	return l != NULL ? l->uri : NULL;
 }
 
 void tl_term_scroll_view(struct tl_term *t, int delta)

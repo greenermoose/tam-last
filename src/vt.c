@@ -4,6 +4,7 @@
  * at and above 0x80 (always text, never C1 controls). */
 #include "tam-last/vt.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <tam_uni.h>
@@ -11,6 +12,57 @@
 void tl_vt_init(struct tl_vt *vt)
 {
 	memset(vt, 0, sizeof(*vt));
+}
+
+void tl_vt_free(struct tl_vt *vt)
+{
+	free(vt->osc_buf);
+	vt->osc_buf = NULL;
+	vt->osc_len = 0;
+	vt->osc_cap = 0;
+	vt->osc_overflow = false;
+}
+
+static void osc_reset(struct tl_vt *vt)
+{
+	vt->osc_len = 0;
+	vt->osc_overflow = false;
+}
+
+static void osc_push(struct tl_vt *vt, unsigned char c)
+{
+	if (vt->osc_overflow)
+		return;
+	if (vt->osc_len >= TL_VT_OSC_MAX) {
+		vt->osc_overflow = true;
+		return;
+	}
+	if (vt->osc_len + 1 >= vt->osc_cap) {
+		size_t ncap = vt->osc_cap == 0 ? 256 : vt->osc_cap * 2;
+		if (ncap > TL_VT_OSC_MAX + 1)
+			ncap = TL_VT_OSC_MAX + 1;
+		char *nb = realloc(vt->osc_buf, ncap);
+		if (nb == NULL) {
+			vt->osc_overflow = true;
+			return;
+		}
+		vt->osc_buf = nb;
+		vt->osc_cap = ncap;
+	}
+	vt->osc_buf[vt->osc_len++] = (char)c;
+}
+
+static void osc_dispatch(struct tl_vt *vt, struct tl_term *t, bool st)
+{
+	if (!vt->osc_overflow) {
+		const char *data = "";
+		if (vt->osc_buf != NULL) {
+			vt->osc_buf[vt->osc_len] = '\0';
+			data = vt->osc_buf;
+		}
+		tl_term_osc(t, data, vt->osc_len, st);
+	}
+	osc_reset(vt);
 }
 
 static void clear(struct tl_vt *vt)
@@ -103,10 +155,16 @@ static void step(struct tl_vt *vt, struct tl_term *t, unsigned char c)
 	/* Transitions from anywhere. */
 	if (c == 0x18 || c == 0x1A) {
 		flush_utf8(vt, t);
+		osc_reset(vt);
 		vt->state = TL_VT_GROUND;
 		return;
 	}
 	if (c == 0x1B) {
+		if (vt->state == TL_VT_OSC) {
+			vt->state = TL_VT_OSC_ESC;
+			return;
+		}
+		osc_reset(vt);
 		flush_utf8(vt, t);
 		clear(vt);
 		vt->state = TL_VT_ESCAPE;
@@ -131,8 +189,10 @@ static void step(struct tl_vt *vt, struct tl_term *t, unsigned char c)
 			vt->state = TL_VT_ESCAPE_INTER;
 		} else if (c == '[') {
 			vt->state = TL_VT_CSI_ENTRY;
-		} else if (c == ']' || c == 'P' || c == 'X' || c == '^' ||
-			   c == '_') {
+		} else if (c == ']') {
+			osc_reset(vt);
+			vt->state = TL_VT_OSC;
+		} else if (c == 'P' || c == 'X' || c == '^' || c == '_') {
 			vt->state = TL_VT_STRING;
 		} else if (c != 0x7F) {
 			vt->state = TL_VT_GROUND;
@@ -195,8 +255,29 @@ static void step(struct tl_vt *vt, struct tl_term *t, unsigned char c)
 			vt->state = TL_VT_GROUND;
 		return;
 
+	case TL_VT_OSC:
+		if (c == 0x07) {
+			vt->state = TL_VT_GROUND;
+			osc_dispatch(vt, t, false);
+		} else if (c >= 0x20) {
+			osc_push(vt, c);
+		}
+		return;
+
+	case TL_VT_OSC_ESC:
+		if (c == '\\') {
+			vt->state = TL_VT_GROUND;
+			osc_dispatch(vt, t, true);
+		} else {
+			osc_reset(vt);
+			clear(vt);
+			vt->state = TL_VT_ESCAPE;
+			step(vt, t, c);
+		}
+		return;
+
 	case TL_VT_STRING:
-		/* Skipped. ESC (handled above) starts ST; BEL ends an OSC. */
+		/* Skipped. ESC (handled above) starts ST; BEL ends a string. */
 		if (c == 0x07)
 			vt->state = TL_VT_GROUND;
 		return;

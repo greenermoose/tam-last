@@ -19,6 +19,7 @@
 #include "tam-last/config.h"
 #include "tam-last/font.h"
 #include "tam-last/keys.h"
+#include "tam-last/osc.h"
 #include "tam-last/proto.h"
 #include "tam-last/pty.h"
 #include "tam-last/render.h"
@@ -38,6 +39,7 @@
 #define TL_BTN_RIGHT 0x111u
 #define TL_BTN_MIDDLE 0x112u
 #define TL_KEYS_BAR_ROWS 4
+#define TL_OSC52_READ_MAX 65536u
 
 struct app {
 	struct tl_window win;
@@ -47,7 +49,6 @@ struct app {
 	struct tl_kbd kbd;
 	const struct tl_layout *key_layout;
 	struct tl_compose compose;
-	struct tl_palette pal;
 	struct tl_config cfg;
 	const char *font_path;
 	float pt;
@@ -78,6 +79,13 @@ struct app {
 	double axis_acc;
 	int paste_fd;
 	bool paste_bracketed;
+	/* Async OSC 52 clipboard read state. */
+	int osc52_fd;
+	char *osc52_buf;
+	size_t osc52_len;
+	size_t osc52_cap;
+	bool osc52_st;
+	char osc52_target[16];
 	bool keys_mode;
 	int keys_bar_rows;
 	char keys_lines[TL_KEYS_BAR_ROWS][512];
@@ -102,13 +110,15 @@ static void on_sigchld(int sig)
 
 static void usage(FILE *out)
 {
-	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-l LAYOUT] [--keys] [-e COMMAND [ARG...]]\n"
+	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-l LAYOUT] [--osc52 POLICY] [--keys] [-e COMMAND [ARG...]]\n"
 	      "\n"
 	      "  -c, --config FILE  configuration file (default: ~/.config/tam-last/tam-last.ini)\n"
 	      "  -f, --font FILE    a TrueType font file (default: $TAM_LAST_FONT,\n"
 	      "                     then JetBrains Mono, DejaVu Sans Mono, ...)\n"
 	      "  -s, --size POINTS  font size (default 9)\n"
 	      "  -l, --layout NAME  keyboard layout (default: us; 'list' prints available)\n"
+	      "      --osc52 POLICY clipboard policy: write/copy (default), disabled/none,\n"
+	      "                     read/paste, both/copy-paste\n"
 	      "      --keys         trace every key event to stderr and a bottom bar\n"
 	      "  -e COMMAND ...     run COMMAND instead of $SHELL\n"
 	      "  -v, --version      print the version\n"
@@ -241,13 +251,13 @@ static void draw(struct app *a, bool force)
 			if (y >= 0)
 				a->buf_dirty[idx][y] = true;
 	}
-	tl_render_rows(&a->term, &a->font, &a->pal, b->pixels, b->width,
+	tl_render_rows(&a->term, &a->font, &a->term.pal, b->pixels, b->width,
 		b->height, a->pad, a->focused, &a->sel, a->buf_dirty[idx], full);
 	if (show_preedit) {
 		struct tl_preedit pe = {
 			a->preedit_text, a->preedit_cbeg, a->preedit_cend
 		};
-		int last_y = tl_render_preedit(&a->term, &a->font, &a->pal,
+		int last_y = tl_render_preedit(&a->term, &a->font, &a->term.pal,
 			b->pixels, b->width, b->height, a->pad, &pe);
 		if (last_y >= 0) {
 			a->preedit_y0 = a->term.cy;
@@ -268,7 +278,7 @@ static void draw(struct app *a, bool force)
 		for (int r = 0; r < a->keys_bar_rows; r++) {
 			const char *text = r < a->keys_count ?
 				a->keys_lines[r] : "";
-			tl_render_bar(&a->font, &a->pal, b->pixels, b->width,
+			tl_render_bar(&a->font, &a->term.pal, b->pixels, b->width,
 				b->height, a->pad, a->term.rows + r,
 				a->term.cols, text);
 		}
@@ -502,8 +512,126 @@ static void update_cursor_shape(struct app *a)
 {
 	bool mouse_app = a->term.mouse_mode != TL_MOUSE_NONE &&
 		!(tl_kbd_mods(&a->kbd) & TL_MOD_SHIFT);
-	tl_window_set_cursor(&a->win, mouse_app ? TL_CURSOR_SHAPE_DEFAULT :
-		TL_CURSOR_SHAPE_TEXT);
+	uint32_t shape = mouse_app ? TL_CURSOR_SHAPE_DEFAULT :
+		a->term.hover_link_id != 0 ? TL_CURSOR_SHAPE_POINTER :
+		TL_CURSOR_SHAPE_TEXT;
+	tl_window_set_cursor(&a->win, shape);
+}
+
+static void send_osc52_reply(struct app *a, const char *target, bool st,
+	const void *data, size_t len)
+{
+	char *b64 = NULL;
+	size_t b64_len = 0;
+	if (tl_base64_encode(data, len, &b64, &b64_len) != 0)
+		return;
+	char hdr[32];
+	int hlen = snprintf(hdr, sizeof(hdr), "\033]52;%s;", target);
+	if (hlen > 0 && (size_t)hlen < sizeof(hdr)) {
+		(void)tl_pty_queue(&a->pty, hdr, (size_t)hlen);
+		if (b64_len > 0)
+			(void)tl_pty_queue(&a->pty, b64, b64_len);
+		if (st)
+			(void)tl_pty_queue(&a->pty, "\033\\", 2);
+		else
+			(void)tl_pty_queue(&a->pty, "\007", 1);
+	}
+	free(b64);
+}
+
+static void finish_osc52_read(struct app *a)
+{
+	send_osc52_reply(a, a->osc52_target, a->osc52_st,
+		a->osc52_buf != NULL ? a->osc52_buf : "", a->osc52_len);
+	if (a->osc52_fd >= 0) {
+		close(a->osc52_fd);
+		a->osc52_fd = -1;
+	}
+	a->osc52_len = 0;
+}
+
+static void drain_osc52_read(struct app *a)
+{
+	char buf[4096];
+	for (;;) {
+		ssize_t n = read(a->osc52_fd, buf, sizeof(buf));
+		if (n > 0) {
+			if (a->osc52_len < TL_OSC52_READ_MAX) {
+				size_t take = (size_t)n;
+				if (a->osc52_len + take > TL_OSC52_READ_MAX)
+					take = TL_OSC52_READ_MAX - a->osc52_len;
+				if (a->osc52_len + take > a->osc52_cap) {
+					size_t ncap = a->osc52_cap == 0 ? 4096 : a->osc52_cap * 2;
+					while (ncap < a->osc52_len + take)
+						ncap *= 2;
+					if (ncap > TL_OSC52_READ_MAX)
+						ncap = TL_OSC52_READ_MAX;
+					char *nb = realloc(a->osc52_buf, ncap);
+					if (nb != NULL) {
+						a->osc52_buf = nb;
+						a->osc52_cap = ncap;
+					} else {
+						take = 0;
+					}
+				}
+				if (take > 0) {
+					memcpy(a->osc52_buf + a->osc52_len, buf, take);
+					a->osc52_len += take;
+				}
+			}
+			continue;
+		}
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+			return;
+		finish_osc52_read(a);
+		return;
+	}
+}
+
+static void handle_term_osc(struct app *a)
+{
+	if (a->term.title_dirty) {
+		tl_window_set_title(&a->win,
+			a->term.title[0] != '\0' ? a->term.title : "tam-last");
+		a->term.title_dirty = false;
+	}
+	if (a->term.osc52_write_pending) {
+		const char *data = a->term.osc52_write_data != NULL ?
+			a->term.osc52_write_data : "";
+		if (a->term.osc52_write_clip)
+			tl_window_set_clipboard(&a->win, data,
+				a->term.osc52_write_len);
+		if (a->term.osc52_write_prim)
+			tl_window_set_primary(&a->win, data,
+				a->term.osc52_write_len);
+		tl_term_osc52_clear_write(&a->term);
+	}
+	if (a->term.osc52_read_pending) {
+		a->term.osc52_read_pending = false;
+		if (a->osc52_fd >= 0) {
+			close(a->osc52_fd);
+			a->osc52_fd = -1;
+		}
+		int fd = tl_window_paste(&a->win, a->term.osc52_read_prim);
+		if (fd >= 0) {
+			a->osc52_fd = fd;
+			a->osc52_len = 0;
+			a->osc52_st = a->term.osc52_read_st;
+			snprintf(a->osc52_target, sizeof(a->osc52_target),
+				"%s", a->term.osc52_read_target);
+		} else {
+			const char *local = a->term.osc52_read_prim ?
+				a->win.prim_text : a->win.clip_text;
+			size_t local_len = a->term.osc52_read_prim ?
+				a->win.prim_len : a->win.clip_len;
+			send_osc52_reply(a, a->term.osc52_read_target,
+				a->term.osc52_read_st,
+				local != NULL ? local : "",
+				local != NULL ? local_len : 0);
+		}
+	}
 }
 
 static void start_paste(struct app *a, bool primary)
@@ -754,11 +882,33 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 	}
 }
 
+static void update_hover_link(struct app *a)
+{
+	uint32_t lid = 0;
+	if (a->ptr_inside) {
+		int row_cols = 0;
+		const struct tl_cell *row = tl_term_abs_row(&a->term,
+			view_abs_y(a, a->ptr_cy), &row_cols);
+		if (row != NULL && a->ptr_cx >= 0 && a->ptr_cx < row_cols) {
+			uint32_t cand = row[a->ptr_cx].link_id;
+			if (tl_term_link(&a->term, cand) != NULL)
+				lid = cand;
+		}
+	}
+	if (lid != a->term.hover_link_id) {
+		a->term.hover_link_id = lid;
+		a->term.full_dirty = true;
+		a->term.dirty = true;
+		a->need_draw = true;
+	}
+}
+
 static void on_pointer_enter(void *ud, double x, double y)
 {
 	struct app *a = ud;
 	a->ptr_inside = true;
 	ptr_to_cell(a, x, y, &a->ptr_cx, &a->ptr_cy);
+	update_hover_link(a);
 	update_cursor_shape(a);
 }
 
@@ -766,6 +916,7 @@ static void on_pointer_leave(void *ud)
 {
 	struct app *a = ud;
 	a->ptr_inside = false;
+	update_hover_link(a);
 }
 
 static void on_pointer_motion(void *ud, double x, double y)
@@ -778,6 +929,8 @@ static void on_pointer_motion(void *ud, double x, double y)
 	a->ptr_cy = cy;
 	if (!moved)
 		return;
+	update_hover_link(a);
+	update_cursor_shape(a);
 	if (a->sel.dragging) {
 		tl_sel_update(&a->sel, &a->term, cx, view_abs_y(a, cy));
 		a->term.full_dirty = true;
@@ -995,6 +1148,8 @@ int main(int argc, char **argv)
 	const char *config_path = NULL;
 	const char *font_path = NULL;
 	const char *layout_name = NULL;
+	enum tl_osc52_policy osc52_cli = TL_OSC52_WRITE;
+	bool osc52_set = false;
 	float pt = 0;
 	bool pt_set = false;
 	bool keys_mode = false;
@@ -1027,6 +1182,13 @@ int main(int argc, char **argv)
 		} else if ((strcmp(s, "-l") == 0 || strcmp(s, "--layout") == 0) &&
 			   i + 1 < argc) {
 			layout_name = argv[++i];
+		} else if (strcmp(s, "--osc52") == 0 && i + 1 < argc) {
+			if (tl_osc52_policy_parse(argv[++i], &osc52_cli) != 0) {
+				fprintf(stderr, "tam-last: bad osc52 policy: %s\n",
+					argv[i]);
+				return 2;
+			}
+			osc52_set = true;
 		} else if (strcmp(s, "--keys") == 0) {
 			keys_mode = true;
 		} else if (strcmp(s, "-v") == 0 || strcmp(s, "--version") == 0) {
@@ -1050,6 +1212,7 @@ int main(int argc, char **argv)
 	setup_locale();
 	static struct app a;
 	a.paste_fd = -1;
+	a.osc52_fd = -1;
 	a.preedit_y0 = a.preedit_y1 = -1;
 	a.keys_mode = keys_mode;
 	if (a.keys_mode) {
@@ -1072,7 +1235,6 @@ int main(int argc, char **argv)
 		if (def_cfg[0] != '\0')
 			(void)tl_config_load_file(&a.cfg, def_cfg);
 	}
-	a.pal = a.cfg.pal;
 	a.pad_logical = a.cfg.pad;
 	const char *want_layout = layout_name != NULL ? layout_name : a.cfg.layout;
 	a.key_layout = tl_layout_find(want_layout);
@@ -1103,6 +1265,8 @@ int main(int argc, char **argv)
 		fprintf(stderr, "tam-last: out of memory\n");
 		return 1;
 	}
+	tl_term_set_palette(&a.term, &a.cfg.pal);
+	tl_term_set_osc52_policy(&a.term, osc52_set ? osc52_cli : a.cfg.osc52);
 	a.pad = a.pad_logical;
 	int init_rows = DEFAULT_ROWS + (a.keys_mode ? TL_KEYS_BAR_ROWS : 0);
 	a.width = a.lw = DEFAULT_COLS * a.font.cell_w + 2 * a.pad_logical;
@@ -1138,6 +1302,7 @@ int main(int argc, char **argv)
 	int status = 0;
 	bool pty_open = true, child_done = false;
 	while (!a.closing) {
+		handle_term_osc(&a);
 		if (a.term.reply_len > 0) {
 			(void)tl_pty_queue(&a.pty, a.term.reply, a.term.reply_len);
 			a.term.reply_len = 0;
@@ -1154,18 +1319,19 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		struct pollfd fds[4] = {
+		struct pollfd fds[5] = {
 			{ tl_window_fd(&a.win), POLLIN | (wl_more ? POLLOUT : 0), 0 },
 			{ pty_open ? a.pty.master : -1,
 			  POLLIN | (pty_more ? POLLOUT : 0), 0 },
 			{ sigchld_pipe[0], POLLIN, 0 },
 			{ a.paste_fd, POLLIN, 0 },
+			{ a.osc52_fd, POLLIN, 0 },
 		};
 		int timeout = -1;
 		if (a.repeat_code != 0 && a.focused)
 			timeout = (int)ms_until(&a.repeat_at);
 
-		if (poll(fds, 4, timeout) < 0 && errno != EINTR) {
+		if (poll(fds, 5, timeout) < 0 && errno != EINTR) {
 			perror("tam-last: poll");
 			break;
 		}
@@ -1194,6 +1360,10 @@ int main(int argc, char **argv)
 		if (a.paste_fd >= 0 &&
 		    (fds[3].revents & (POLLIN | POLLHUP | POLLERR)))
 			drain_paste(&a);
+
+		if (a.osc52_fd >= 0 &&
+		    (fds[4].revents & (POLLIN | POLLHUP | POLLERR)))
+			drain_osc52_read(&a);
 
 		if (a.repeat_code != 0 && a.focused &&
 		    ms_until(&a.repeat_at) == 0) {
@@ -1224,6 +1394,9 @@ int main(int argc, char **argv)
 		kill(-a.pty.pid, SIGHUP);
 	if (a.paste_fd >= 0)
 		close(a.paste_fd);
+	if (a.osc52_fd >= 0)
+		close(a.osc52_fd);
+	free(a.osc52_buf);
 	free(a.preedit_text);
 	free(a.buf_dirty[0]);
 	free(a.buf_dirty[1]);

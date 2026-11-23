@@ -1,0 +1,65 @@
+W13 OSC SUITE: TITLES, CWD, HYPERLINKS, CLIPBOARD POLICY, COLORS (0.2.0)
+
+Date: 2026-11-23
+AI harness: agy
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice for tam-last"
+  Fred: "1 defer until 0.2.2 / 2 accept both, plus --osc52 on the CLI / Approved. Proceed."
+  Fred: "Pass. Commit and finish"
+
+
+DONE
+
+  - Added TL_VT_OSC and TL_VT_OSC_ESC states to the VT parser
+    (include/tam-last/vt.h, src/vt.c) with a 128 KiB capped dynamic
+    buffer, BEL vs ST terminator tracking, C0 filtering, CAN/SUB and
+    non-ST ESC aborts, and tl_vt_free().
+  - Moved struct tl_palette into include/tam-last/term.h so struct
+    tl_term owns pal and default_pal; added title, cwd, hostname,
+    bounded OSC 8 hyperlink ring (TL_LINK_MAX = 256, link_id preserved
+    across SGR 0), OSC 52 policy and pending write/read state, and a
+    4096-byte reply buffer (src/term.c).
+  - Created include/tam-last/osc.h and src/osc.c implementing:
+    - OSC 0 and 2: sanitized UTF-8 window titles with empty/RIS reset.
+    - OSC 7: file:// working directory with local-hostname validation
+      and percent-decoding.
+    - OSC 8: hyperlinks with id= grouping and scrollback lookup.
+    - OSC 52: base64 encode/decode and clipboard policy (write-only by
+      default; read denied unless enabled).
+    - OSC 4, 10, 11, 12, 104, 110, 111, 112: X11 color parsing, query
+      replies matching BEL/ST, live palette updates, and theme resets.
+  - Added osc52 policy parsing in include/tam-last/config.h and
+    src/config.c accepting write/copy, disabled/none, read/paste, and
+    both/copy-paste, plus --osc52 on the CLI in src/main.c.
+  - Added TL_CURSOR_SHAPE_POINTER in include/tam-last/proto.h,
+    tl_window_set_title() in include/tam-last/window.h and src/window.c,
+    dotted/hover hyperlink underlines in src/render.c, and live title,
+    async OSC 52 read/write, and OSC 8 hover/pointer integration in
+    src/main.c (Ctrl+Click link opening deferred to 0.2.2).
+  - Expanded tests/test_vt.c (389 checks), tests/test_config.c (51
+    checks), and tests/test_render.c (89 checks).
+  - Added interactive sandbox/demo-osc (option a in sandbox/play and
+    documented in sandbox/README-sandbox).
+  - Bumped VERSION to 0.2.0 and updated plans/P3-daily-parity.md.
+  - Verified make clean && make (zero warnings), make test, make
+    sanitize (ASan/UBSan + headless tam-pane), readelf -d (libc and
+    libm only), sh -n, and tam-idol/tools/idol-check.
+  - Fred tested and accepted tam-last 0.2.0 on 2026-11-23.
+
+
+FAILED
+
+  - None.
+
+
+HANDOFF
+
+  - Fred accepted 0.2.0 (OSC 0/2, 7, 8, 52 with policy, 4/10/11/12/104/
+    110-112) on 2026-11-23.
+  - Next milestone is Phase P3, 0.2.1 (synchronized output DEC 2026,
+    DA2, XTVERSION, DECRQM, and our own terminfo entry tam-last; see
+    plans/P3-daily-parity.md).

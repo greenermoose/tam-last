@@ -124,6 +124,7 @@ void tl_window_present_damage(struct tl_window *win, struct tl_buffer *b,
 bool tl_window_can_scale(const struct tl_window *win);
 bool tl_window_frame_pending(const struct tl_window *win);
 
+void tl_window_set_title(struct tl_window *win, const char *title);
 void tl_window_set_cursor(struct tl_window *win, uint32_t shape);
 void tl_window_set_clipboard(struct tl_window *win, const char *text,
 	size_t len);

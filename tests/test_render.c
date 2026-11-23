@@ -158,6 +158,35 @@ int main(int argc, char **argv)
 		free(ppx);
 		tl_term_free(&pt);
 	}
+
+	/* OSC 8 hyperlink dotted underline vs hovered solid underline & OSC 11 bg update. */
+	{
+		struct tl_term lt;
+		CHECK(tl_term_init(&lt, 6, 2) == 0);
+		feed(&lt, "\033]8;;https://tamlinux.org\033\\AA\033]8;;\033\\");
+		feed(&lt, "\033]11;#112233\033\\");
+		int lw = 6 * font.cell_w + 2 * pad;
+		int lh = 2 * font.cell_h + 2 * pad;
+		uint32_t *lpx = calloc((size_t)lw * (size_t)lh, sizeof(*lpx));
+		CHECK(lpx != NULL);
+		int line_h = font.cell_h / 14 > 0 ? font.cell_h / 14 : 1;
+		int ul_y = pad + font.baseline + line_h;
+
+		/* Unhovered: dotted underline (on at x+0, off at x+2), bg from OSC 11. */
+		tl_render(&lt, &font, &lt.pal, lpx, lw, lh, pad, false);
+		CHECK(lpx[0] == 0x112233);
+		CHECK(lpx[ul_y * lw + pad + 0] == lt.pal.fg);
+		CHECK(lpx[ul_y * lw + pad + 2] == 0x112233);
+
+		/* Hovered: solid underline across the whole cell. */
+		lt.hover_link_id = tl_term_cell(&lt, 0, 0)->link_id;
+		tl_render(&lt, &font, &lt.pal, lpx, lw, lh, pad, false);
+		CHECK(lpx[ul_y * lw + pad + 0] == lt.pal.fg);
+		CHECK(lpx[ul_y * lw + pad + 2] == lt.pal.fg);
+
+		free(lpx);
+		tl_term_free(&lt);
+	}
 	free(px);
 	tl_term_free(&t);
 	tl_font_close(&font);

@@ -3,41 +3,48 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-23, with W12
+Updated: 2026-11-23, with W13
 
 
 STATE
 
-  Version 0.1.3 on branch dev (Phase P2 complete; Fred accepted 0.1.3 on
-  2026-11-23, W12). Implemented and verified:
-  - Wayland text-input-v3 (zwp_text_input_manager_v3 v1,
-    zwp_text_input_v3) hand-written wire requests and double-buffered
-    event state machine (protocols/text-input-unstable-v3.xml,
-    src/wl/proto.c, src/window.c) with content purpose = terminal and
-    deduplicated surface-local cursor rectangle reporting.
-  - In-place UTF-8 preedit overlay rendering (src/render.c
-    tl_render_preedit) with underline, selection range inversion,
-    bar/hidden cursor, wide characters, combining marks, and wrapping.
-  - --keys trace support for IME preedit and commit events
-    (src/keys/trace.c tl_key_trace_ime) and integration in src/main.c
-    with preedit dirty-row tracking and local Compose reset.
-  - Interactive sandbox/demo-ime (option 0 in sandbox/play).
+  Version 0.2.0 on branch dev (Phase P3 started; Fred accepted 0.2.0 on
+  2026-11-23, W13). Implemented and verified:
+  - VT parser OSC support (TL_VT_OSC / TL_VT_OSC_ESC, 128 KiB cap, BEL
+    vs ST terminator tracking) in include/tam-last/vt.h and src/vt.c.
+  - Dedicated OSC module (include/tam-last/osc.h, src/osc.c) and
+    terminal state (include/tam-last/term.h, src/term.c):
+    - OSC 0/2 window titles with live xdg_toplevel.set_title updates
+      (tl_window_set_title).
+    - OSC 7 working directory tracking with local-hostname check and
+      percent-decoding.
+    - OSC 8 hyperlinks with id= grouping, scrollback lookup, dotted
+      underline, hover solid underline, and pointer cursor (link
+      opening deferred to 0.2.2).
+    - OSC 52 clipboard with configurable policy (write-only by default;
+      tam-last.ini osc52= and --osc52 CLI accepting write/copy,
+      disabled/none, read/paste, both/copy-paste) and async piped reads.
+    - OSC 4, 10, 11, 12, 104, 110, 111, 112 color queries, live changes,
+      and resets to the configured palette.
+  - Interactive sandbox/demo-osc (option a in sandbox/play).
 
-  make test (test_wire 173, test_vt 318, test_ttf 3036, test_keys 266,
-  test_render 82, test_config 41, version 0.1.3, headless tam-pane),
-  ASan/UBSan sanitize tests, demo-ime PTY smoke test, readelf -d (libc
-  and libm only), and idol-check all pass with zero warnings.
+  make test (test_wire 173, test_vt 389, test_ttf 3036, test_keys 266,
+  test_render 89, test_config 51, version 0.2.0, headless tam-pane),
+  ASan/UBSan sanitize tests, readelf -d (libc and libm only), and
+  idol-check all pass with zero warnings.
 
 
 NEXT
 
-  1. Phase P3, 0.2.0 (window titles, OSC 7, OSC 8, OSC 52 with a policy,
-     color queries and changes; see plans/P3-daily-parity.md).
+  1. Phase P3, 0.2.1 (synchronized output DEC 2026, DA2, XTVERSION,
+     DECRQM, and our own terminfo entry tam-last; see
+     plans/P3-daily-parity.md).
 
 
 WAITING FOR FRED
 
-  - Open points in the plans: TERM (P1); kitty decoding in libtam (P2).
+  - Open points in the plans: TERM (P1); kitty decoding in libtam (P2);
+    notification path and Sixel/kitty graphics (P3).
     (Layouts stay in tam-last for now and will lift into libtam when
     tam-pane reaches P6.)
 

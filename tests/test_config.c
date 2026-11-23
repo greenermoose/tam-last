@@ -16,6 +16,7 @@ int main(int argc, char **argv)
 	CHECK(strcmp(cfg.layout, "us") == 0);
 	CHECK(cfg.size == 9.0f);
 	CHECK(cfg.pad == 2);
+	CHECK(cfg.osc52 == TL_OSC52_WRITE);
 	CHECK(cfg.pal.fg == 0xa9b1d6);
 	CHECK(cfg.pal.bg == 0x1a1b26);
 	CHECK(cfg.pal.cursor == 0xc0caf5);
@@ -104,6 +105,27 @@ int main(int argc, char **argv)
 	CHECK(cfg.pad == 6);
 	CHECK(cfg.pal.bg == 0x223344);
 	CHECK(tl_config_load_file(&cfg, "/nonexistent/tam-last.ini") == -1);
+
+	/* OSC 52 policy names (both tam-last and foot.ini spellings). */
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = disabled\n") == 0 &&
+		cfg.osc52 == TL_OSC52_DISABLED);
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = none\n") == 0 &&
+		cfg.osc52 == TL_OSC52_DISABLED);
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = write\n") == 0 &&
+		cfg.osc52 == TL_OSC52_WRITE);
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = copy\n") == 0 &&
+		cfg.osc52 == TL_OSC52_WRITE);
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = read\n") == 0 &&
+		cfg.osc52 == TL_OSC52_READ);
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = paste\n") == 0 &&
+		cfg.osc52 == TL_OSC52_READ);
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = both\n") == 0 &&
+		cfg.osc52 == TL_OSC52_BOTH);
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = copy-paste\n") == 0 &&
+		cfg.osc52 == TL_OSC52_BOTH);
+	/* Invalid value leaves previous policy intact. */
+	CHECK(tl_config_load_string(&cfg, "[main]\nosc52 = bogus\n") == 0 &&
+		cfg.osc52 == TL_OSC52_BOTH);
 
 	CHECK_DONE("test_config");
 }

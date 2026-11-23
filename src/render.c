@@ -68,6 +68,19 @@ static void rect(uint32_t *px, int width, int height, int x0, int y0,
 	}
 }
 
+static void dotted_line(uint32_t *px, int width, int height, int x0, int y0,
+	int w, int h, uint32_t color)
+{
+	for (int y = y0; y < y0 + h; y++) {
+		if (y < 0 || y >= height)
+			continue;
+		for (int x = x0; x < x0 + w; x++) {
+			if (x >= 0 && x < width && (((x - x0) / 2) & 1) == 0)
+				px[(size_t)y * (size_t)width + (size_t)x] = color;
+		}
+	}
+}
+
 static void draw_glyph(struct tl_font *f, uint32_t cp, int span, uint8_t style,
 	uint32_t fg, uint32_t *pixels, int width, int height, int px0, int py0)
 {
@@ -111,7 +124,7 @@ void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 		int abs_y = sb - view_off + y;
 		for (int x = 0; x < t->cols; x++) {
 			static const struct tl_cell blank_cell = {
-				' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0
+				' ', { 0, 0 }, TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0, 0
 			};
 			const struct tl_cell *c = (row != NULL && x < row_cols) ?
 				&row[x] : &blank_cell;
@@ -148,9 +161,16 @@ void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 						fg, pixels, width, height, px0,
 						py0);
 			}
-			if (c->attrs & TL_ATTR_UNDERLINE)
+			bool link_hover = c->link_id != 0 &&
+				t->hover_link_id != 0 &&
+				c->link_id == t->hover_link_id;
+			if ((c->attrs & TL_ATTR_UNDERLINE) || link_hover)
 				rect(pixels, width, height, px0, py0 + f->baseline + line_h,
 					cw * span, line_h, fg);
+			else if (c->link_id != 0)
+				dotted_line(pixels, width, height, px0,
+					py0 + f->baseline + line_h, cw * span,
+					line_h, fg);
 			if (c->attrs & TL_ATTR_STRIKE)
 				rect(pixels, width, height, px0, py0 + ch / 2, cw * span,
 					line_h, fg);

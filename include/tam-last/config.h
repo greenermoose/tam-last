@@ -16,8 +16,13 @@ struct tl_config {
 	char layout[64];
 	float size;
 	int pad;
+	enum tl_osc52_policy osc52;
 	struct tl_palette pal;
 };
+
+/* Parse an OSC 52 policy string: write/copy, disabled/none, read/paste,
+ * both/copy-paste. Returns 0 on success, -1 on unknown value. */
+int tl_osc52_policy_parse(const char *s, enum tl_osc52_policy *out);
 
 /* Fill cfg with compiled-in defaults (Tamlinux Tokyo Night theme, 9 pt, 2 px pad). */
 void tl_config_default(struct tl_config *cfg);

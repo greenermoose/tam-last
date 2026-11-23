@@ -1,0 +1,91 @@
+#!/bin/sh
+# Interactive demo for tam-last 0.2.0: OSC 0/2 (title), OSC 7 (cwd),
+# OSC 8 (hyperlinks), OSC 52 (clipboard policy), and OSC 4/10/11/12/104 (colors).
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" -e "$0" --in-term
+fi
+
+cleanup() {
+	printf '\033]104\033\\\033]110\033\\\033]111\033\\\033]112\033\\\033]2;\033\\'
+}
+trap cleanup EXIT
+
+read_osc_reply() {
+	old=$(stty -g 2>/dev/null || true)
+	if [ -z "$old" ]; then
+		echo "(no tty)"
+		return
+	fi
+	stty raw -echo min 0 time 3
+	reply=$(dd bs=256 count=1 2>/dev/null | tr '\033\007' '^!' || true)
+	stty "$old"
+	if [ -z "$reply" ]; then
+		echo "(no reply)"
+	else
+		printf '%s\n' "$reply"
+	fi
+}
+
+printf '\033[2J\033[H'
+printf '\033]2;tam-last 0.2.0 — OSC demo\033\\'
+printf '\033]7;file://%s%s\033\\' "$(hostname 2>/dev/null || echo localhost)" "$PWD"
+
+printf '\033[1;36m=== tam-last 0.2.0 OSC Demo ===\033[0m\n\n'
+printf '1. \033[1mOSC 0/2 Window Title:\033[0m set to "tam-last 0.2.0 — OSC demo"\n'
+printf '2. \033[1mOSC 7 Working Dir:\033[0m   emitted file://%s%s\n' \
+	"$(hostname 2>/dev/null || echo localhost)" "$PWD"
+printf '3. \033[1mOSC 8 Hyperlinks:\033[0m    hover with the pointer (dotted -> solid underline):\n'
+printf '   \033]8;id=tl;https://github.com/greenermoose/tam-last\033\\tam-last on GitHub\033]8;;\033\\   '
+printf '\033]8;;https://tamlinux.org\033\\Tamlinux\033]8;;\033\\\n\n'
+
+printf '4. \033[1mOSC 4/10/11/12 Color Queries:\033[0m\n'
+printf '   OSC 10 (fg):     '
+printf '\033]10;?\033\\'
+read_osc_reply
+printf '   OSC 11 (bg):     '
+printf '\033]11;?\033\\'
+read_osc_reply
+printf '   OSC 12 (cursor): '
+printf '\033]12;?\033\\'
+read_osc_reply
+printf '   OSC 4;1 (red):   '
+printf '\033]4;1;?\033\\'
+read_osc_reply
+
+printf '\n5. \033[1mOSC 52 Clipboard Policy:\033[0m\n'
+printf '   Writing "tam-last 0.2.0" to clipboard via OSC 52...\n'
+printf '\033]52;c;dGFtLWxhc3QgMC4yLjA=\033\\'
+printf '   Querying clipboard (OSC 52;c;?): '
+printf '\033]52;c;?\033\\'
+read_osc_reply
+printf '   (Default write-only policy replies "(no reply)"; run with --osc52 both to read.)\n\n'
+
+printf 'Press [t] to swap palette/bg colors, [r] to reset (OSC 104/110-112), [q] to quit: '
+while :; do
+	old=$(stty -g 2>/dev/null || true)
+	if [ -n "$old" ]; then
+		stty raw -echo
+		ch=$(dd bs=1 count=1 2>/dev/null || true)
+		stty "$old"
+	else
+		IFS= read -r ch || break
+	fi
+	case "$ch" in
+	t | T)
+		printf '\033]11;#282828\033\\\033]10;#ebdbb2\033\\\033]12;#fabd2f\033\\\033]4;6;#8ec07c\033\\'
+		printf '\r\033[KSwapped to Gruvbox-like colors via OSC 4/10/11/12. Press [r] to reset, [q] to quit: '
+		;;
+	r | R)
+		printf '\033]104\033\\\033]110\033\\\033]111\033\\\033]112\033\\'
+		printf '\r\033[KReset colors via OSC 104/110/111/112. Press [t] to swap, [q] to quit: '
+		;;
+	q | Q | '')
+		printf '\n'
+		break
+		;;
+	esac
+done

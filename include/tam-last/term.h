@@ -44,6 +44,35 @@ enum tl_mouse_mode {
 #define TL_SB_MAX_ROWS 4096
 #define TL_SB_RING_CAP 128
 #define TL_KITTY_KBD_STACK_MAX 16
+#define TL_TITLE_MAX 512
+#define TL_CWD_MAX 4096
+#define TL_LINK_MAX 256
+#define TL_LINK_URI_MAX 2048
+#define TL_REPLY_MAX 4096
+
+struct tl_palette {
+	uint32_t fg, bg, cursor, cursor_text;
+	uint32_t index[256];
+};
+
+/* The compiled-in colors: Tamlinux's current dark theme (Tokyo Night) for
+ * the first 16, then the standard 6x6x6 cube and gray ramp. */
+void tl_palette_default(struct tl_palette *p);
+uint32_t tl_color_resolve(const struct tl_palette *p, uint32_t color,
+	bool fg);
+
+enum tl_osc52_policy {
+	TL_OSC52_WRITE = 0, /* default: write-only (copy allowed, read denied) */
+	TL_OSC52_DISABLED,  /* neither read nor write */
+	TL_OSC52_READ,      /* read-only */
+	TL_OSC52_BOTH       /* read and write */
+};
+
+struct tl_link {
+	uint32_t id;   /* non-zero monotonic id; 0 = unused slot */
+	char *uri;     /* validated URI string */
+	char *user_id; /* optional id= parameter from OSC 8, or NULL */
+};
 
 struct tl_sb_page {
 	struct tl_cell *cells;
@@ -61,11 +90,13 @@ struct tl_cell {
 	uint32_t fg, bg;
 	uint16_t attrs;
 	uint8_t ncomb;
+	uint32_t link_id; /* 0 = no OSC 8 hyperlink */
 };
 
 struct tl_pen {
 	uint32_t fg, bg;
 	uint16_t attrs;
+	uint32_t link_id;
 };
 
 struct tl_saved {
@@ -105,11 +136,35 @@ struct tl_term {
 	int sb_count;
 	int sb_len; /* total rows in scrollback */
 	int view_offset; /* 0 = live bottom, >0 = scrolled up */
+	/* Dynamic palette (OSC 4, 10, 11, 12, 104, 110-112). */
+	struct tl_palette pal;
+	struct tl_palette default_pal;
+	/* Window title (OSC 0, 2) and working directory (OSC 7). */
+	char title[TL_TITLE_MAX];
+	bool title_dirty;
+	char *cwd;
+	char hostname[256];
+	/* Hyperlink table (OSC 8). */
+	struct tl_link links[TL_LINK_MAX];
+	uint32_t next_link_id;
+	uint32_t link_cursor;
+	uint32_t hover_link_id;
+	/* Clipboard (OSC 52) policy and pending requests for the host loop. */
+	enum tl_osc52_policy osc52_policy;
+	bool osc52_write_pending;
+	bool osc52_write_clip;
+	bool osc52_write_prim;
+	char *osc52_write_data;
+	size_t osc52_write_len;
+	bool osc52_read_pending;
+	bool osc52_read_prim;
+	bool osc52_read_st;
+	char osc52_read_target[16];
 	bool dirty;
 	bool full_dirty;
 	bool *dirty_rows;
-	/* Answers to queries (DSR, DA), for the caller to write to the pty. */
-	unsigned char reply[256];
+	/* Answers to queries (DSR, DA, OSC 4/10/11/12), for the caller to write to the pty. */
+	unsigned char reply[TL_REPLY_MAX];
 	size_t reply_len;
 	struct tl_vt vt;
 };
@@ -123,6 +178,17 @@ int tl_term_resize(struct tl_term *t, int cols, int rows);
 void tl_term_feed(struct tl_term *t, const void *data, size_t len);
 /* Active kitty keyboard protocol flags for the current screen. */
 unsigned tl_term_kitty_kbd_flags(const struct tl_term *t);
+/* Set both the active and default palette (used by OSC 104 / 110-112 / RIS). */
+void tl_term_set_palette(struct tl_term *t, const struct tl_palette *pal);
+void tl_term_set_osc52_policy(struct tl_term *t, enum tl_osc52_policy policy);
+/* Append bytes to the PTY reply buffer (used by term.c and osc.c). */
+void tl_term_reply(struct tl_term *t, const void *data, size_t len);
+void tl_term_mark_all(struct tl_term *t);
+/* Clear a consumed OSC 52 write request. */
+void tl_term_osc52_clear_write(struct tl_term *t);
+/* Look up an OSC 8 hyperlink by id or cell coordinate. */
+const struct tl_link *tl_term_link(const struct tl_term *t, uint32_t link_id);
+const char *tl_term_link_uri(const struct tl_term *t, int x, int abs_y);
 
 /* Scrollback navigation (primary screen only). */
 void tl_term_scroll_view(struct tl_term *t, int delta);

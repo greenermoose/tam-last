@@ -54,6 +54,29 @@ static void expand_tilde(const char *src, char *dst, size_t dstlen)
 	snprintf(dst, dstlen, "%s", src);
 }
 
+int tl_osc52_policy_parse(const char *s, enum tl_osc52_policy *out)
+{
+	if (s == NULL || out == NULL)
+		return -1;
+	if (strcmp(s, "write") == 0 || strcmp(s, "copy") == 0) {
+		*out = TL_OSC52_WRITE;
+		return 0;
+	}
+	if (strcmp(s, "disabled") == 0 || strcmp(s, "none") == 0) {
+		*out = TL_OSC52_DISABLED;
+		return 0;
+	}
+	if (strcmp(s, "read") == 0 || strcmp(s, "paste") == 0) {
+		*out = TL_OSC52_READ;
+		return 0;
+	}
+	if (strcmp(s, "both") == 0 || strcmp(s, "copy-paste") == 0) {
+		*out = TL_OSC52_BOTH;
+		return 0;
+	}
+	return -1;
+}
+
 static int load_file_depth(struct tl_config *cfg, const char *path, int depth);
 
 static int on_ini(void *user, const char *section, const char *name,
@@ -100,6 +123,13 @@ static int on_ini(void *user, const char *section, const char *name,
 				cfg->pad = (int)v;
 			else
 				fprintf(stderr, "tam-last: config: bad pad: %s\n",
+					value);
+		} else if (strcmp(name, "osc52") == 0) {
+			enum tl_osc52_policy pol;
+			if (tl_osc52_policy_parse(value, &pol) == 0)
+				cfg->osc52 = pol;
+			else
+				fprintf(stderr, "tam-last: config: bad osc52 policy: %s\n",
 					value);
 		} else if (strcmp(name, "include") == 0) {
 			if (ctx->depth < INCLUDE_MAX_DEPTH) {
@@ -190,6 +220,7 @@ void tl_config_default(struct tl_config *cfg)
 	snprintf(cfg->layout, sizeof(cfg->layout), "%s", "us");
 	cfg->size = 9.0f;
 	cfg->pad = 2;
+	cfg->osc52 = TL_OSC52_WRITE;
 	tl_palette_default(&cfg->pal);
 }
 
