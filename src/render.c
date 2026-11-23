@@ -177,3 +177,24 @@ void tl_render(const struct tl_term *t, struct tl_font *f,
 	tl_render_rows(t, f, pal, pixels, width, height, pad, focused, NULL,
 		NULL, true);
 }
+
+void tl_render_bar(struct tl_font *f, const struct tl_palette *pal,
+	uint32_t *pixels, int width, int height, int pad, int y_row, int cols,
+	const char *text)
+{
+	int cw = f->cell_w, ch = f->cell_h;
+	int py0 = pad + y_row * ch;
+	if (cols <= 0 || py0 >= height || py0 + ch <= 0)
+		return;
+	uint32_t bg = pal->index[8];
+	uint32_t fg = pal->index[15];
+	rect(pixels, width, height, 0, py0, width, ch, bg);
+	if (text == NULL)
+		return;
+	for (int x = 0; x < cols && text[x] != '\0'; x++) {
+		unsigned char c = (unsigned char)text[x];
+		if (c > ' ' && c <= 0x7e)
+			draw_glyph(f, c, 1, TL_STYLE_REGULAR, fg, pixels,
+				width, height, pad + x * cw, py0);
+	}
+}

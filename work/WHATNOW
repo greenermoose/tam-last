@@ -3,34 +3,39 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-23, with W9
+Updated: 2026-11-23, with W10
 
 
 STATE
 
-  Version 0.1.0 on branch dev (Phase P2 started; Fred accepted 0.1.0
-  via sandbox/play on 2026-11-23, W9). Implemented and verified:
-  - Per-screen bounded kitty keyboard flags stack (16 entries) in
-    src/term.c: CSI ? u query, CSI > flags u push, CSI < n u pop,
-    CSI = flags ; mode u set/OR/clear, and reset on ESC c.
-  - All five progressive enhancement flags in src/keys/encode.c:
-    disambiguate (1), event types press/repeat/release (2), alternate
-    shifted keys (4), all keys as escape codes including modifiers (8),
-    and associated text (16), wired through src/main.c.
-  - Interactive sandbox/demo-kitty (option 7 in sandbox/play) to toggle
-    flags 1..16 and inspect raw sequences and decoded fields live.
+  Version 0.1.1 on branch dev (Phase P2; Fred accepted 0.1.1 via
+  sandbox/play on 2026-11-23, W10). Implemented and verified:
+  - tam-last --keys trace mode: src/keys/trace.c (tl_evdev_name,
+    tl_key_char, tl_key_trace_format) formatting evdev code and name,
+    press/repeat/release, held modifiers and locks, layout character,
+    active kitty flags, and exact bytes written to the pty (readable
+    form + hex).
+  - Emits each trace line to stderr (flushed) and renders the last 4
+    events in a reserved bottom overlay bar (tl_render_bar in
+    src/render.c), covering presses, repeats, releases, and intercepted
+    terminal shortcuts (suppressing stray shortcut releases in kitty
+    mode).
+  - Interactive sandbox/demo-keys (option 8 in sandbox/play) launching
+    tam-last --keys with a raw-mode receiver to compare trace output
+    directly against what the program received.
 
-  make test (test_wire 116, test_vt 318, test_ttf 3036, test_keys 139,
-  test_render 66, test_config 38, version 0.1.0, headless tam-pane),
-  ASan/UBSan sanitize tests, and readelf -d (libc and libm only) all
-  pass with zero warnings.
+  make test (test_wire 116, test_vt 318, test_ttf 3036, test_keys 177,
+  test_render 69, test_config 38, version 0.1.1, headless tam-pane),
+  ASan/UBSan sanitize tests, headless --keys smoke test, demo-keys PTY
+  smoke test, readelf -d (libc and libm only), and idol-check all pass
+  with zero warnings.
 
 
 NEXT
 
-  1. Phase P2, 0.1.1 (tam-last --keys: show evdev code/name, press or
-     release, held modifiers and locks, layout character, and exact
-     bytes written to the pty; see plans/P2-key-path.md).
+  1. Phase P2, 0.1.2 (layouts compiled at build time from a compact
+     source format, with AltGr, dead keys, and compose; see
+     plans/P2-key-path.md).
 
 
 WAITING FOR FRED

@@ -353,5 +353,119 @@ int main(void)
 		d1.key == 'a' && d1.shifted == 'A' && d1.mods == TL_MOD_SHIFT &&
 		d1.ev == TL_KEY_PRESS && d1.text == 'A');
 
+	/* Key trace (--keys, 0.1.1): evdev names, layout char, formatting,
+	 * truncation safety, and byte-for-byte match with pty output. */
+	CHECK(strcmp(tl_evdev_name(TL_KEY_ESC), "KEY_ESC") == 0);
+	CHECK(strcmp(tl_evdev_name(TL_KEY_C), "KEY_C") == 0);
+	CHECK(strcmp(tl_evdev_name(TL_KEY_LEFTCTRL), "KEY_LEFTCTRL") == 0);
+	CHECK(strcmp(tl_evdev_name(TL_KEY_COMPOSE), "KEY_COMPOSE") == 0);
+	CHECK(tl_evdev_name(0) == NULL);
+	CHECK(tl_evdev_name(TL_KEY_COUNT) == NULL);
+	CHECK(tl_evdev_name(9999) == NULL);
+
+	CHECK(tl_key_char(TL_KEY_A, 0, &plain) == 'a');
+	CHECK(tl_key_char(TL_KEY_A, TL_MOD_SHIFT, &plain) == 'A');
+	CHECK(tl_key_char(TL_KEY_KP5, 0, &num) == '5');
+	CHECK(tl_key_char(TL_KEY_KP5, 0, &plain) == 0);
+	CHECK(tl_key_char(TL_KEY_UP, 0, &plain) == 0);
+
+	{
+		char line[256];
+		char seq[TL_KEY_SEQ_MAX];
+		size_t n;
+
+		n = tl_key_encode_event(TL_KEY_C, TL_MOD_CTRL, TL_KEY_PRESS,
+			&plain, seq);
+		tl_key_trace_format(line, sizeof(line), TL_KEY_C, TL_MOD_CTRL,
+			TL_KEY_PRESS, &plain, seq, n, NULL);
+		CHECK(strcmp(line,
+			"46 KEY_C press mods=Ctrl locks=- char='c' pty=\"\\x03\" [03]") == 0);
+
+		n = tl_key_encode_event(TL_KEY_H, TL_MOD_CTRL, TL_KEY_PRESS,
+			&k_dis, seq);
+		tl_key_trace_format(line, sizeof(line), TL_KEY_H, TL_MOD_CTRL,
+			TL_KEY_PRESS, &k_dis, seq, n, NULL);
+		CHECK(strcmp(line,
+			"35 KEY_H press mods=Ctrl locks=- char='h' kitty=1 "
+			"pty=\"ESC[104;5u\" [1b 5b 31 30 34 3b 35 75]") == 0);
+
+		n = tl_key_encode_event(TL_KEY_LEFTCTRL, TL_MOD_CTRL,
+			TL_KEY_PRESS, &plain, seq);
+		tl_key_trace_format(line, sizeof(line), TL_KEY_LEFTCTRL,
+			TL_MOD_CTRL, TL_KEY_PRESS, &plain, seq, n, NULL);
+		CHECK(strcmp(line,
+			"29 KEY_LEFTCTRL press mods=Ctrl locks=- char=- pty=(none)") == 0);
+
+		tl_key_trace_format(line, sizeof(line), TL_KEY_C,
+			TL_MOD_CTRL | TL_MOD_SHIFT, TL_KEY_PRESS, &plain,
+			NULL, 0, "copy");
+		CHECK(strcmp(line,
+			"46 KEY_C press mods=Shift+Ctrl locks=- char='C' "
+			"pty=(none) [copy]") == 0);
+
+		struct tl_key_modes both_locks = { false, false, true, true,
+			TL_KITTY_DISAMBIGUATE | TL_KITTY_EVENTS };
+		n = tl_key_encode_event(TL_KEY_A, TL_MOD_ALT, TL_KEY_RELEASE,
+			&both_locks, seq);
+		tl_key_trace_format(line, sizeof(line), TL_KEY_A, TL_MOD_ALT,
+			TL_KEY_RELEASE, &both_locks, seq, n, NULL);
+		CHECK(strstr(line, "30 KEY_A release mods=Alt locks=Caps+Num char='A' kitty=3") != NULL);
+
+		/* Unknown evdev code and small-buffer truncation safety. */
+		tl_key_trace_format(line, sizeof(line), 200, 0, TL_KEY_PRESS,
+			&plain, NULL, 0, NULL);
+		CHECK(strcmp(line,
+			"200 UNKNOWN press mods=- locks=- char=- pty=(none)") == 0);
+		char tiny[12];
+		size_t wlen = tl_key_trace_format(tiny, sizeof(tiny), TL_KEY_A,
+			0, TL_KEY_PRESS, &plain, "a", 1, NULL);
+		CHECK(wlen == 11 && tiny[11] == '\0');
+		CHECK(tl_key_trace_format(tiny, 0, TL_KEY_A, 0, TL_KEY_PRESS,
+			&plain, "a", 1, NULL) == 0);
+
+		/* Acceptance: hex bytes in --keys trace match exact pty bytes. */
+		const struct {
+			uint32_t code;
+			unsigned mods;
+			enum tl_key_event ev;
+			const struct tl_key_modes *m;
+		} cases[] = {
+			{ TL_KEY_A, 0, TL_KEY_PRESS, &plain },
+			{ TL_KEY_C, TL_MOD_CTRL, TL_KEY_PRESS, &plain },
+			{ TL_KEY_UP, TL_MOD_CTRL, TL_KEY_PRESS, &plain },
+			{ TL_KEY_BACKSPACE, TL_MOD_ALT, TL_KEY_PRESS, &plain },
+			{ TL_KEY_H, TL_MOD_CTRL, TL_KEY_PRESS, &k_dis },
+			{ TL_KEY_A, TL_MOD_SHIFT, TL_KEY_PRESS, &k_full },
+			{ TL_KEY_A, TL_MOD_CTRL, TL_KEY_REPEAT, &k_ev },
+			{ TL_KEY_A, TL_MOD_CTRL, TL_KEY_RELEASE, &k_ev },
+			{ TL_KEY_KP5, 0, TL_KEY_PRESS, &k_full_num },
+		};
+		for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+			n = tl_key_encode_event(cases[i].code, cases[i].mods,
+				cases[i].ev, cases[i].m, seq);
+			tl_key_trace_format(line, sizeof(line), cases[i].code,
+				cases[i].mods, cases[i].ev, cases[i].m,
+				seq, n, NULL);
+			const char *lb = strrchr(line, '[');
+			const char *rb = strrchr(line, ']');
+			CHECK(lb != NULL && rb != NULL && rb > lb);
+			unsigned char parsed[TL_KEY_SEQ_MAX];
+			size_t pn = 0;
+			const char *p = lb + 1;
+			while (p < rb && pn < sizeof(parsed)) {
+				unsigned val = 0;
+				int consumed = 0;
+				if (sscanf(p, "%2x%n", &val, &consumed) != 1 ||
+				    consumed != 2)
+					break;
+				parsed[pn++] = (unsigned char)val;
+				p += consumed;
+				if (p < rb && *p == ' ')
+					p++;
+			}
+			CHECK(pn == n && memcmp(parsed, seq, n) == 0);
+		}
+	}
+
 	CHECK_DONE("test_keys");
 }

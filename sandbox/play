@@ -29,9 +29,10 @@ while :; do
 	printf '  \033[1;32m5\033[0m  Full-Screen (0.0.3) alt screen, scroll region, cursor styles, DEC gfx\n'
 	printf '  \033[1;32m6\033[0m  Gruvbox Config      open a new window with sandbox/theme-gruvbox.ini\n'
 	printf '  \033[1;32m7\033[0m  Kitty Keys (0.1.0)  progressive flags, CSI u, release/repeat, alt keys\n'
+	printf '  \033[1;32m8\033[0m  Key Trace (0.1.1)   open a new --keys window and compare pty bytes\n'
 	printf '  \033[1;32ms\033[0m  Shell               drop into %s inside this tam-last window\n' "${SHELL:-/bin/sh}"
 	printf '  \033[1;32mq\033[0m  Quit\n\n'
-	printf 'Choose [1-7, s, q]: '
+	printf 'Choose [1-8, s, q]: '
 
 	old=$(stty -g 2>/dev/null || true)
 	if [ -n "$old" ]; then
@@ -51,6 +52,7 @@ while :; do
 	5) "$DIR/demo-fullscreen" --in-term || true ;;
 	6) "$DIR/demo-config" & ;;
 	7) "$DIR/demo-kitty" --in-term || true ;;
+	8) "$DIR/demo-keys" 2>/dev/null & ;;
 	s | S) "${SHELL:-/bin/sh}" || true ;;
 	q | Q | '') break ;;
 	esac

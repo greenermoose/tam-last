@@ -32,4 +32,9 @@ void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 	int pad, bool focused, const struct tl_sel *sel, const bool *rows,
 	bool full);
 
+/* Draw a single-row status/overlay bar (e.g. for --keys) at grid row y_row. */
+void tl_render_bar(struct tl_font *f, const struct tl_palette *pal,
+	uint32_t *pixels, int width, int height, int pad, int y_row, int cols,
+	const char *text);
+
 #endif

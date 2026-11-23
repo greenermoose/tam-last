@@ -1,0 +1,117 @@
+#!/bin/sh
+# Interactive demo for tam-last 0.1.1: --keys trace mode.
+# Launches build/tam-last --keys with a raw-mode receiver that prints the exact
+# bytes the child program read from the pty, so you can compare them directly
+# against the --keys overlay bar at the bottom of the window (and stderr).
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$DIR/.." && pwd)
+
+if [ "${1:-}" != "--in-term" ]; then
+	exec "$ROOT/build/tam-last" --keys -e "$0" --in-term
+fi
+
+if ! [ -t 0 ]; then
+	printf 'demo-keys needs a terminal.\n' >&2
+	exit 1
+fi
+
+exec python3 -c '
+import os, select, sys, termios, tty
+
+fd = sys.stdin.fileno()
+old = termios.tcgetattr(fd)
+
+def write(s):
+    os.write(sys.stdout.fileno(), s.encode("utf-8"))
+
+def fmt_readable(b):
+    out = []
+    for c in b:
+        if c == 0x1b:
+            out.append("ESC")
+        elif c == 0x0d:
+            out.append("\\r")
+        elif c == 0x0a:
+            out.append("\\n")
+        elif c == 0x09:
+            out.append("\\t")
+        elif c == 0x22:
+            out.append("\\\"")
+        elif c == 0x5c:
+            out.append("\\\\")
+        elif 32 <= c < 127:
+            out.append(chr(c))
+        else:
+            out.append(f"\\x{c:02x}")
+    return "".join(out)
+
+def fmt_hex(b):
+    return " ".join(f"{c:02x}" for c in b)
+
+kitty = 0
+
+def header():
+    mode = "kitty=31 (all 5 flags)" if kitty else "legacy (kitty=0)"
+    write("\033[2J\033[H")
+    write("\033[1;36m=== tam-last 0.1.1: --keys Trace Verifier ===\033[0m\r\n")
+    write(f"Mode: \033[1;33m{mode}\033[0m   (F1 toggles legacy <-> kitty=31, Ctrl+Q quits)\r\n")
+    write("Compare the bottom 4-line --keys bar against \"program received\" below:\r\n")
+    write("  - Type a, Shift+A, Ctrl+C, Ctrl+H, or Up arrow.\r\n")
+    write("  - Tap Left Shift or Left Ctrl alone (0 bytes in legacy; CSI u in kitty=31).\r\n")
+    write("  - Hold a key down for 1s to see \"repeat\", then let go to see \"release\".\r\n")
+    write("  - Press Shift+PgUp to see a terminal shortcut ([scroll-up], 0 pty bytes).\r\n\r\n")
+
+def is_ctrl_q(data):
+    if data == b"\x11":
+        return True
+    if data.startswith(b"\x1b[113;") and data.endswith(b"u"):
+        parts = data[2:-1].decode("ascii", "replace").split(";")
+        if len(parts) >= 2:
+            mp = parts[1].split(":")
+            if mp[0].isdigit():
+                bits = (int(mp[0]) - 1) & 15
+                ev = int(mp[1]) if len(mp) > 1 and mp[1].isdigit() else 1
+                if bits == 4 and ev == 1:
+                    return True
+    return False
+
+def is_f1(data):
+    if data in (b"\x1bOP", b"\x1b[P"):
+        return True
+    if data.startswith(b"\x1b[1;") and data.endswith(b"P"):
+        mp = data[4:-1].decode("ascii", "replace").split(":")
+        if mp[0].isdigit():
+            bits = (int(mp[0]) - 1) & 15
+            ev = int(mp[1]) if len(mp) > 1 and mp[1].isdigit() else 1
+            if bits == 0 and ev == 1:
+                return True
+    return False
+
+try:
+    tty.setraw(fd)
+    header()
+    while True:
+        r, _, _ = select.select([fd], [], [])
+        if not r:
+            continue
+        data = os.read(fd, 256)
+        if not data:
+            break
+        if is_ctrl_q(data):
+            break
+        if is_f1(data):
+            kitty = 0 if kitty else 31
+            if kitty:
+                write("\033[>31u")
+            else:
+                write("\033[<u")
+            header()
+            continue
+        write(f"  program received: \"{fmt_readable(data)}\"  [{fmt_hex(data)}]\r\n")
+finally:
+    if kitty:
+        write("\033[<u")
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    write("\r\n")
+'

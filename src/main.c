@@ -37,6 +37,7 @@
 #define TL_BTN_LEFT 0x110u
 #define TL_BTN_RIGHT 0x111u
 #define TL_BTN_MIDDLE 0x112u
+#define TL_KEYS_BAR_ROWS 4
 
 struct app {
 	struct tl_window win;
@@ -75,6 +76,12 @@ struct app {
 	double axis_acc;
 	int paste_fd;
 	bool paste_bracketed;
+	bool keys_mode;
+	int keys_bar_rows;
+	char keys_lines[TL_KEYS_BAR_ROWS][512];
+	int keys_count;
+	bool buf_bar_dirty[2];
+	uint32_t shortcut_code;
 };
 
 static int sigchld_pipe[2] = { -1, -1 };
@@ -89,12 +96,13 @@ static void on_sigchld(int sig)
 
 static void usage(FILE *out)
 {
-	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-e COMMAND [ARG...]]\n"
+	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [--keys] [-e COMMAND [ARG...]]\n"
 	      "\n"
 	      "  -c, --config FILE  configuration file (default: ~/.config/tam-last/tam-last.ini)\n"
 	      "  -f, --font FILE    a TrueType font file (default: $TAM_LAST_FONT,\n"
 	      "                     then JetBrains Mono, DejaVu Sans Mono, ...)\n"
 	      "  -s, --size POINTS  font size (default 9)\n"
+	      "      --keys         trace every key event to stderr and a bottom bar\n"
 	      "  -e COMMAND ...     run COMMAND instead of $SHELL\n"
 	      "  -v, --version      print the version\n"
 	      "  -h, --help         this help\n", out);
@@ -176,12 +184,26 @@ static void draw(struct app *a, bool force)
 	bool full = a->buf_full[idx] || a->buf_dirty[idx] == NULL;
 	tl_render_rows(&a->term, &a->font, &a->pal, b->pixels, b->width,
 		b->height, a->pad, a->focused, &a->sel, a->buf_dirty[idx], full);
+	bool bar_drawn = false;
+	if (a->keys_mode && a->keys_bar_rows > 0 &&
+	    (full || a->buf_bar_dirty[idx])) {
+		for (int r = 0; r < a->keys_bar_rows; r++) {
+			const char *text = r < a->keys_count ?
+				a->keys_lines[r] : "";
+			tl_render_bar(&a->font, &a->pal, b->pixels, b->width,
+				b->height, a->pad, a->term.rows + r,
+				a->term.cols, text);
+		}
+		a->buf_bar_dirty[idx] = false;
+		bar_drawn = true;
+	}
 
 	struct tl_rect rects[64];
 	size_t nrects = 0;
 	if (!full) {
 		int cw = a->font.cell_w, ch = a->font.cell_h;
 		int y = 0;
+		bool overflow = false;
 		while (y < a->term.rows) {
 			if (!a->buf_dirty[idx][y]) {
 				y++;
@@ -192,6 +214,7 @@ static void draw(struct app *a, bool force)
 				y++;
 			if (nrects == sizeof(rects) / sizeof(rects[0])) {
 				nrects = 0; /* too many bands: damage whole buffer */
+				overflow = true;
 				break;
 			}
 			rects[nrects++] = (struct tl_rect){
@@ -199,10 +222,15 @@ static void draw(struct app *a, bool force)
 				a->term.cols * cw, (y - y0) * ch
 			};
 		}
-		if (nrects == 0 && !a->buf_dirty[idx][0]) {
-			/* Nothing changed in this buffer: still commit 1x1 or full?
-			 * Actually if a row was dirty we had nrects > 0; if 0 bands
-			 * because of overflow, nrects == 0 damages full buffer. */
+		if (bar_drawn && !overflow) {
+			if (nrects == sizeof(rects) / sizeof(rects[0])) {
+				nrects = 0;
+			} else {
+				rects[nrects++] = (struct tl_rect){
+					0, a->pad + a->term.rows * ch,
+					a->width, a->keys_bar_rows * ch
+				};
+			}
 		}
 	}
 	tl_window_present_damage(&a->win, b, a->lw, a->lh, rects, nrects);
@@ -211,6 +239,42 @@ static void draw(struct app *a, bool force)
 		memset(a->buf_dirty[idx], 0, (size_t)a->buf_dirty_rows * sizeof(bool));
 	a->need_draw = false;
 	a->term.dirty = false;
+}
+
+static void trace_key(struct app *a, uint32_t code, enum tl_key_event ev,
+	const struct tl_key_modes *m, const char *seq, size_t n,
+	const char *note)
+{
+	char line[512];
+	tl_key_trace_format(line, sizeof(line), code, tl_kbd_mods(&a->kbd),
+		ev, m, seq, n, note);
+	fputs(line, stderr);
+	fputc('\n', stderr);
+	fflush(stderr);
+	int cap = a->keys_bar_rows > 0 ? a->keys_bar_rows : TL_KEYS_BAR_ROWS;
+	if (cap > TL_KEYS_BAR_ROWS)
+		cap = TL_KEYS_BAR_ROWS;
+	if (a->keys_count >= cap) {
+		for (int i = 1; i < cap; i++)
+			memcpy(a->keys_lines[i - 1], a->keys_lines[i],
+				sizeof(a->keys_lines[0]));
+		a->keys_count = cap - 1;
+	}
+	memcpy(a->keys_lines[a->keys_count++], line, sizeof(line));
+	a->buf_bar_dirty[0] = a->buf_bar_dirty[1] = true;
+	a->need_draw = true;
+}
+
+static void trace_shortcut(struct app *a, uint32_t code, const char *note)
+{
+	a->shortcut_code = code;
+	if (!a->keys_mode)
+		return;
+	struct tl_key_modes m = {
+		a->term.app_cursor, a->term.app_keypad, a->kbd.num, a->kbd.caps,
+		tl_term_kitty_kbd_flags(&a->term),
+	};
+	trace_key(a, code, TL_KEY_PRESS, &m, NULL, 0, note);
 }
 
 static void send_key(struct app *a, uint32_t code, enum tl_key_event ev)
@@ -223,6 +287,8 @@ static void send_key(struct app *a, uint32_t code, enum tl_key_event ev)
 	size_t n = tl_key_encode_event(code, tl_kbd_mods(&a->kbd), ev, &m, seq);
 	if (n > 0)
 		(void)tl_pty_queue(&a->pty, seq, n);
+	if (a->keys_mode)
+		trace_key(a, code, ev, &m, seq, n, NULL);
 }
 
 /* Logical to device pixels, rounded as fractional-scale-v1 asks. */
@@ -243,7 +309,15 @@ static void layout(struct app *a)
 	a->width = to_device(a, a->lw);
 	a->height = to_device(a, a->lh);
 	int cols = (a->width - 2 * a->pad) / a->font.cell_w;
-	int rows = (a->height - 2 * a->pad) / a->font.cell_h;
+	int total_rows = (a->height - 2 * a->pad) / a->font.cell_h;
+	int bar_rows = 0;
+	if (a->keys_mode && total_rows > 1) {
+		bar_rows = total_rows - 1;
+		if (bar_rows > TL_KEYS_BAR_ROWS)
+			bar_rows = TL_KEYS_BAR_ROWS;
+	}
+	a->keys_bar_rows = bar_rows;
+	int rows = total_rows - bar_rows;
 	if (cols < 1)
 		cols = 1;
 	if (rows < 1)
@@ -259,9 +333,11 @@ static void on_configure(void *ud, int width, int height)
 	struct app *a = ud;
 	if (width <= 0 || height <= 0) {
 		/* Ours to choose: keep the current grid. */
+		int want_rows = a->term.rows +
+			(a->keys_mode ? TL_KEYS_BAR_ROWS : 0);
 		width = to_logical(a, a->term.cols * a->font.cell_w +
 			2 * to_device(a, a->pad_logical));
-		height = to_logical(a, a->term.rows * a->font.cell_h +
+		height = to_logical(a, want_rows * a->font.cell_h +
 			2 * to_device(a, a->pad_logical));
 	}
 	a->lw = width;
@@ -461,23 +537,40 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 	if (!pressed) {
 		if (code == a->repeat_code)
 			a->repeat_code = 0;
-		if (tl_term_kitty_kbd_flags(&a->term) & TL_KITTY_EVENTS)
+		if (code == a->shortcut_code && a->shortcut_code != 0) {
+			a->shortcut_code = 0;
+			if (a->keys_mode) {
+				struct tl_key_modes m = {
+					a->term.app_cursor, a->term.app_keypad,
+					a->kbd.num, a->kbd.caps,
+					tl_term_kitty_kbd_flags(&a->term),
+				};
+				trace_key(a, code, TL_KEY_RELEASE, &m,
+					NULL, 0, NULL);
+			}
+			return;
+		}
+		if ((tl_term_kitty_kbd_flags(&a->term) & TL_KITTY_EVENTS) ||
+		    a->keys_mode)
 			send_key(a, code, TL_KEY_RELEASE);
 		return;
 	}
 	unsigned mods = tl_kbd_mods(&a->kbd);
 	int page = a->term.rows / 2 > 0 ? a->term.rows / 2 : 1;
 	if (code == TL_KEY_PAGEUP && mods == TL_MOD_SHIFT) {
+		trace_shortcut(a, code, "scroll-up");
 		tl_term_scroll_view(&a->term, page);
 		draw(a, false);
 		return;
 	}
 	if (code == TL_KEY_PAGEDOWN && mods == TL_MOD_SHIFT) {
+		trace_shortcut(a, code, "scroll-down");
 		tl_term_scroll_view(&a->term, -page);
 		draw(a, false);
 		return;
 	}
 	if (code == TL_KEY_C && mods == (TL_MOD_CTRL | TL_MOD_SHIFT)) {
+		trace_shortcut(a, code, "copy");
 		size_t len = 0;
 		char *text = tl_sel_extract(&a->term, &a->sel, &len);
 		if (text != NULL && len > 0)
@@ -486,11 +579,13 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 		return;
 	}
 	if (code == TL_KEY_V && mods == (TL_MOD_CTRL | TL_MOD_SHIFT)) {
+		trace_shortcut(a, code, "paste");
 		tl_term_reset_view(&a->term);
 		start_paste(a, false);
 		return;
 	}
 	if (code == TL_KEY_INSERT && mods == TL_MOD_SHIFT) {
+		trace_shortcut(a, code, "paste-primary");
 		tl_term_reset_view(&a->term);
 		start_paste(a, true);
 		return;
@@ -700,6 +795,7 @@ int main(int argc, char **argv)
 	const char *font_path = NULL;
 	float pt = 0;
 	bool pt_set = false;
+	bool keys_mode = false;
 	char **cmd = NULL;
 
 	for (int i = 1; i < argc; i++) {
@@ -726,6 +822,8 @@ int main(int argc, char **argv)
 				return 2;
 			}
 			pt_set = true;
+		} else if (strcmp(s, "--keys") == 0) {
+			keys_mode = true;
 		} else if (strcmp(s, "-v") == 0 || strcmp(s, "--version") == 0) {
 			printf("tam-last %s\n", TL_VERSION);
 			return 0;
@@ -742,6 +840,15 @@ int main(int argc, char **argv)
 	setup_locale();
 	static struct app a;
 	a.paste_fd = -1;
+	a.keys_mode = keys_mode;
+	if (a.keys_mode) {
+		a.keys_bar_rows = TL_KEYS_BAR_ROWS;
+		snprintf(a.keys_lines[0], sizeof(a.keys_lines[0]),
+			"keys: press any key (last %d events here; full log on stderr)",
+			TL_KEYS_BAR_ROWS);
+		a.keys_count = 1;
+		a.buf_bar_dirty[0] = a.buf_bar_dirty[1] = true;
+	}
 	char err[300];
 	tl_config_default(&a.cfg);
 	if (config_path != NULL) {
@@ -776,8 +883,9 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	a.pad = a.pad_logical;
+	int init_rows = DEFAULT_ROWS + (a.keys_mode ? TL_KEYS_BAR_ROWS : 0);
 	a.width = a.lw = DEFAULT_COLS * a.font.cell_w + 2 * a.pad_logical;
-	a.height = a.lh = DEFAULT_ROWS * a.font.cell_h + 2 * a.pad_logical;
+	a.height = a.lh = init_rows * a.font.cell_h + 2 * a.pad_logical;
 
 	if (pipe(sigchld_pipe) != 0) {
 		perror("tam-last: pipe");

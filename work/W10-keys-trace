@@ -1,0 +1,66 @@
+W10 --KEYS TRACE MODE (0.1.1)
+
+Date: 2026-11-23
+AI harness: agy
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice for tam-last"
+  Fred: "Design point confirmed. Plan approved. Proceed."
+  Fred: "Shift + PgUp didn't work as expected. Also, what is meant by 'modifiers' and 'hold/release'."
+  Fred: "Are the key presses supposed to be echoing in the first window?"
+  Fred: "Everything looks good. Commit and finish."
+
+
+DONE
+
+  - Added pure key-event tracing module src/keys/trace.c (declared in
+    include/tam-last/keys.h, linked in Makefile):
+    - tl_evdev_name() mapping all TL_KEY_* codes in evdev.h to their
+      Linux KEY_* names (NULL for unknown codes).
+    - tl_key_char() resolving layout characters including NumLock
+      keypad digits.
+    - tl_key_trace_format() producing a deterministic one-line trace
+      with evdev code/name, press/repeat/release, held modifiers, locks,
+      layout character, active kitty flags when non-zero, and exact pty
+      bytes in both readable form and hex ([xx yy ...]) plus optional
+      shortcut notes.
+  - Added tl_render_bar() in include/tam-last/render.h and src/render.c
+    to render a 1-row bottom overlay bar clipped to window bounds.
+  - Wired --keys in src/main.c: reserves a 4-row rolling trace bar below
+    the terminal grid, traces every press, repeat, release, and
+    intercepted shortcut (scroll-up, scroll-down, copy, paste,
+    paste-primary) to both stderr (flushed per event) and the bottom
+    bar with incremental Wayland damage rects, and suppresses stray
+    kitty release events for intercepted shortcuts.
+  - Expanded tests/test_keys.c (177 checks, including hex-to-pty
+    byte-for-byte round-trip verification across legacy and kitty modes)
+    and tests/test_render.c (69 checks, including tl_render_bar).
+  - Added interactive sandbox/demo-keys (raw-mode pty receiver with F1
+    legacy/kitty toggle and Ctrl+Q quit) and wired it as option 8 in
+    sandbox/play and sandbox/README-sandbox.
+  - Bumped VERSION to 0.1.1 and updated plans/P2-key-path.md.
+  - Verified make clean && make (zero warnings), make test, make
+    sanitize (ASan/UBSan + headless tam-pane), headless --keys smoke
+    test, demo-keys PTY smoke test, readelf -d (libc and libm only),
+    sh -n, and tam-idol/tools/idol-check.
+  - Fred tested and accepted tam-last 0.1.1 on 2026-11-23.
+
+
+FAILED
+
+  - Initial 1-row --keys bar was overwritten immediately by key release
+    events (hiding chords like Shift+PgUp [scroll-up]) and released
+    shortcuts emitted a stray kitty release; fixed with a 4-row rolling
+    bar and shortcut release suppression.
+  - sandbox/play launched demo-keys without redirecting stderr, echoing
+    key traces into the raw-mode menu window; fixed with 2>/dev/null.
+
+
+HANDOFF
+
+  - Fred accepted 0.1.1 (--keys trace mode) on 2026-11-23.
+  - Next milestone is Phase P2, 0.1.2 (compiled layouts with AltGr,
+    dead keys, and compose; see plans/P2-key-path.md).

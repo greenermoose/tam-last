@@ -97,6 +97,20 @@ int main(int argc, char **argv)
 	tl_term_scroll_view(&t, 1);
 	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, NULL, NULL, true);
 	CHECK(px[cy * w + pad + font.cell_w / 2] == pal.index[1]);
+
+	/* Overlay bar rendering (--keys): fills bar strip and draws glyphs. */
+	{
+		int bh = 3 * font.cell_h + 2 * pad;
+		uint32_t *bpx = calloc((size_t)w * (size_t)bh, sizeof(*bpx));
+		CHECK(bpx != NULL);
+		tl_render_bar(&font, &pal, bpx, w, bh, pad, 2, 4, "A   extra");
+		int bar_y = pad + 2 * font.cell_h;
+		CHECK(bpx[bar_y * w + 0] == pal.index[8]);
+		CHECK(bpx[(bar_y + font.baseline - 2) * w + pad + font.cell_w / 2] == pal.index[15]);
+		/* Out-of-bounds y_row is a safe no-op. */
+		tl_render_bar(&font, &pal, bpx, w, bh, pad, 99, 4, "clipped");
+		free(bpx);
+	}
 	free(px);
 	tl_term_free(&t);
 	tl_font_close(&font);

@@ -78,4 +78,19 @@ size_t tl_key_encode_event(uint32_t code, unsigned mods, enum tl_key_event ev,
 size_t tl_key_encode(uint32_t code, unsigned mods,
 	const struct tl_key_modes *m, char out[TL_KEY_SEQ_MAX]);
 
+/* Linux evdev name ("KEY_A", "KEY_LEFTCTRL", ...) or NULL if unknown. */
+const char *tl_evdev_name(uint32_t code);
+
+/* The character a key types under the current modifiers and locks
+ * (including keypad digits when Num Lock is on), or 0 for keys that type
+ * none. */
+uint32_t tl_key_char(uint32_t code, unsigned mods,
+	const struct tl_key_modes *m);
+
+/* Format one key-event trace line for --keys into buf (always NUL-terminated
+ * when cap > 0). Returns the number of characters written (excluding NUL). */
+size_t tl_key_trace_format(char *buf, size_t cap, uint32_t code,
+	unsigned mods, enum tl_key_event ev, const struct tl_key_modes *m,
+	const char *pty_bytes, size_t pty_len, const char *note);
+
 #endif

@@ -34,7 +34,7 @@ LDLIBS = $(LIBTAM) -lm
 CORE_SRCS = src/wl/conn.c src/wl/proto.c src/window.c src/shm.c \
 	src/font/ttf.c src/font/raster.c src/font/box.c src/font/font.c \
 	src/config.c src/vt.c src/term.c src/select.c src/render.c \
-	src/keys/keymap.c src/keys/encode.c src/pty.c
+	src/keys/keymap.c src/keys/encode.c src/keys/trace.c src/pty.c
 CORE_OBJS = $(patsubst src/%.c,$(B)/%.o,$(CORE_SRCS))
 TESTS = $(B)/tests/test_wire $(B)/tests/test_vt $(B)/tests/test_ttf \
 	$(B)/tests/test_keys $(B)/tests/test_render $(B)/tests/test_config
