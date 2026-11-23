@@ -657,6 +657,55 @@ int main(void)
 	CHECK(t.reply_len == strlen(want_decrqm_on) &&
 		memcmp(t.reply, want_decrqm_on, t.reply_len) == 0);
 
+	/* OSC 777 desktop notifications. */
+	feed("\033c");
+	CHECK(!t.notify.pending);
+	feed("\033]777;notify;Build done;0 errors, 2 warnings\033\\");
+	CHECK(t.notify.pending);
+	CHECK(t.notify.urgency == TL_NOTIFY_NORMAL);
+	CHECK(!t.notify.only_unfocused);
+	CHECK(strcmp(t.notify.title, "Build done") == 0);
+	CHECK(strcmp(t.notify.body, "0 errors, 2 warnings") == 0);
+	tl_term_notify_clear(&t);
+	CHECK(!t.notify.pending);
+	/* Non-notify OSC 777 and empty payload are ignored. */
+	feed("\033]777;other;foo;bar\007");
+	CHECK(!t.notify.pending);
+	feed("\033]777;notify;;\007");
+	CHECK(!t.notify.pending);
+	/* Control characters stripped from title and body. */
+	feed("\033]777;notify;Hi\001\nThere;Ok\002!\033\\");
+	CHECK(t.notify.pending);
+	CHECK(strcmp(t.notify.title, "HiThere") == 0);
+	CHECK(strcmp(t.notify.body, "Ok!") == 0);
+	tl_term_notify_clear(&t);
+
+	/* OSC 99 desktop notifications (single-shot, chunked, base64, urgency, occasion). */
+	feed("\033]99;;Simple title\033\\");
+	CHECK(t.notify.pending);
+	CHECK(t.notify.urgency == TL_NOTIFY_NORMAL);
+	CHECK(!t.notify.only_unfocused);
+	CHECK(strcmp(t.notify.title, "Simple title") == 0);
+	CHECK(t.notify.body[0] == '\0');
+	tl_term_notify_clear(&t);
+
+	feed("\033]99;i=job1:p=title:d=0:u=2:o=unfocused;Alert\033\\");
+	CHECK(!t.notify.pending);
+	feed("\033]99;i=job1:p=body:d=0;Line 1\033\\");
+	CHECK(!t.notify.pending);
+	/* "\nLine 2" in base64 = CkxpbmUgMg== */
+	feed("\033]99;i=job1:p=body:d=1:e=1;CkxpbmUgMg==\033\\");
+	CHECK(t.notify.pending);
+	CHECK(t.notify.urgency == TL_NOTIFY_CRITICAL);
+	CHECK(t.notify.only_unfocused);
+	CHECK(strcmp(t.notify.title, "Alert") == 0);
+	CHECK(strcmp(t.notify.body, "Line 1\nLine 2") == 0);
+	/* RIS clears pending notification and partial accumulator. */
+	feed("\033]99;i=job2:p=title:d=0;Partial\033\\");
+	feed("\033c");
+	CHECK(!t.notify.pending);
+	CHECK(!t.notify_acc.active);
+
 	/* Garbage never breaks the invariants. */
 	srand(1);
 	unsigned char junk[4096];

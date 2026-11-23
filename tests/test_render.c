@@ -81,21 +81,24 @@ int main(int argc, char **argv)
 	/* Partial tl_render_rows: only row 1 drawn, row 0 left as sentinel. */
 	px[pad * w + pad] = 0x123456;
 	bool only_row1[2] = { false, true };
-	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, NULL, only_row1, false);
+	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, NULL, NULL,
+		only_row1, false);
 	CHECK(px[pad * w + pad] == 0x123456);
 
 	/* Selection highlights by inverting fg and bg. */
 	struct tl_sel sel;
 	tl_sel_start(&sel, &t, 0, 0, TL_SEL_CHAR);
 	tl_sel_end(&sel);
-	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, &sel, NULL, true);
+	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, &sel, NULL, NULL,
+		true);
 	CHECK(px[cy * w + pad + font.cell_w / 2] == pal.bg);
 
 	/* Scrollback rendering hides the live cursor and shows history. */
 	feed(&t, "\r\nbc\r\nde");
 	CHECK(t.sb_len == 1);
 	tl_term_scroll_view(&t, 1);
-	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, NULL, NULL, true);
+	tl_render_rows(&t, &font, &pal, px, w, h, pad, true, NULL, NULL, NULL,
+		true);
 	CHECK(px[cy * w + pad + font.cell_w / 2] == pal.index[1]);
 
 	/* Overlay bar rendering (--keys): fills bar strip and draws glyphs. */
@@ -294,6 +297,28 @@ int main(int argc, char **argv)
 		CHECK(write_ppm(out, px, w, h) == 0);
 		printf("test_render: wrote %s (%s, cells of %dx%d px)\n", out,
 			path, font.cell_w, font.cell_h);
+
+		/* Search highlight, URL hint overlay, and UTF-8 status bar. */
+		if (k == 0) {
+			struct tl_search srch;
+			memset(&srch, 0, sizeof(srch));
+			tl_search_start(&srch, &t);
+			tl_search_push_utf8(&srch, &t, "Unicode", 7);
+			CHECK(srch.match_count == 1);
+			tl_render_rows(&t, &font, &pal, px, w, h, 2, true,
+				NULL, &srch, NULL, true);
+			tl_render_bar(&font, &pal, px, w, h, 2, t.rows - 1,
+				t.cols, "search: caf\xc3\xa9_  [1/1]");
+			tl_search_free(&srch);
+
+			feed(&t, "\r\nhttps://tamlinux.org/last");
+			struct tl_url_mode urls;
+			memset(&urls, 0, sizeof(urls));
+			CHECK(tl_url_start(&urls, &t) == 1);
+			tl_render_urls(&t, &font, &pal, px, w, h, 2, &urls);
+			tl_url_end(&urls);
+		}
+
 		free(px);
 		tl_term_free(&t);
 		tl_font_close(&font);

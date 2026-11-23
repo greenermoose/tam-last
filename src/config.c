@@ -77,6 +77,27 @@ int tl_osc52_policy_parse(const char *s, enum tl_osc52_policy *out)
 	return -1;
 }
 
+int tl_notify_policy_parse(const char *s, enum tl_notify_policy *out)
+{
+	if (s == NULL || out == NULL)
+		return -1;
+	if (strcmp(s, "unfocused") == 0) {
+		*out = TL_NOTIFY_UNFOCUSED;
+		return 0;
+	}
+	if (strcmp(s, "yes") == 0 || strcmp(s, "always") == 0 ||
+	    strcmp(s, "true") == 0) {
+		*out = TL_NOTIFY_ALWAYS;
+		return 0;
+	}
+	if (strcmp(s, "no") == 0 || strcmp(s, "disabled") == 0 ||
+	    strcmp(s, "none") == 0 || strcmp(s, "false") == 0) {
+		*out = TL_NOTIFY_DISABLED;
+		return 0;
+	}
+	return -1;
+}
+
 static int load_file_depth(struct tl_config *cfg, const char *path, int depth);
 
 static int on_ini(void *user, const char *section, const char *name,
@@ -143,6 +164,13 @@ static int on_ini(void *user, const char *section, const char *name,
 				cfg->osc52 = pol;
 			else
 				fprintf(stderr, "tam-last: config: bad osc52 policy: %s\n",
+					value);
+		} else if (strcmp(name, "notify") == 0) {
+			enum tl_notify_policy np;
+			if (tl_notify_policy_parse(value, &np) == 0)
+				cfg->notify = np;
+			else
+				fprintf(stderr, "tam-last: config: bad notify policy: %s\n",
 					value);
 		} else if (strcmp(name, "include") == 0) {
 			if (ctx->depth < INCLUDE_MAX_DEPTH) {
@@ -234,6 +262,7 @@ void tl_config_default(struct tl_config *cfg)
 	cfg->size = 9.0f;
 	cfg->pad = 2;
 	cfg->osc52 = TL_OSC52_WRITE;
+	cfg->notify = TL_NOTIFY_UNFOCUSED;
 	tl_palette_default(&cfg->pal);
 }
 

@@ -16,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "tam-last/action.h"
 #include "tam-last/config.h"
 #include "tam-last/font.h"
 #include "tam-last/keys.h"
@@ -23,8 +24,10 @@
 #include "tam-last/proto.h"
 #include "tam-last/pty.h"
 #include "tam-last/render.h"
+#include "tam-last/search.h"
 #include "tam-last/select.h"
 #include "tam-last/term.h"
+#include "tam-last/url.h"
 #include "tam-last/window.h"
 
 #ifndef TL_VERSION
@@ -100,6 +103,11 @@ struct app {
 	/* Synchronized output (DEC 2026) safety timeout. */
 	bool sync_armed;
 	struct timespec sync_deadline;
+	/* Interactive modes (0.2.2): scrollback search, URL hints, notifications. */
+	struct tl_search search;
+	struct tl_url_mode urls;
+	struct tl_actions actions;
+	enum tl_notify_policy notify_policy;
 };
 
 static int sigchld_pipe[2] = { -1, -1 };
@@ -114,7 +122,7 @@ static void on_sigchld(int sig)
 
 static void usage(FILE *out)
 {
-	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-l LAYOUT] [--term NAME] [--osc52 POLICY] [--keys] [-e COMMAND [ARG...]]\n"
+	fputs("usage: tam-last [-c CONFIG] [-f FONT] [-s POINTS] [-l LAYOUT] [--term NAME] [--osc52 POLICY] [--notify POLICY] [--keys] [-e COMMAND [ARG...]]\n"
 	      "\n"
 	      "  -c, --config FILE  configuration file (default: ~/.config/tam-last/tam-last.ini)\n"
 	      "  -f, --font FILE    a TrueType font file (default: $TAM_LAST_FONT,\n"
@@ -124,6 +132,7 @@ static void usage(FILE *out)
 	      "      --term NAME    override $TERM (default: tam-last if installed, else xterm-256color)\n"
 	      "      --osc52 POLICY clipboard policy: write/copy (default), disabled/none,\n"
 	      "                     read/paste, both/copy-paste\n"
+	      "      --notify POL   desktop notifications: unfocused (default), yes/always, no/disabled\n"
 	      "      --keys         trace every key event to stderr and a bottom bar\n"
 	      "  -e COMMAND ...     run COMMAND instead of $SHELL\n"
 	      "  -v, --version      print the version\n"
@@ -261,7 +270,22 @@ static void draw(struct app *a, bool force)
 				a->buf_dirty[idx][y] = true;
 	}
 	tl_render_rows(&a->term, &a->font, &a->term.pal, b->pixels, b->width,
-		b->height, a->pad, a->focused, &a->sel, a->buf_dirty[idx], full);
+		b->height, a->pad, a->focused, &a->sel,
+		a->search.active ? &a->search : NULL, a->buf_dirty[idx], full);
+	if (a->urls.active)
+		tl_render_urls(&a->term, &a->font, &a->term.pal, b->pixels,
+			b->width, b->height, a->pad, &a->urls);
+	if (a->search.active || a->urls.active) {
+		char bar[512];
+		if (a->search.active)
+			tl_search_format_bar(&a->search, bar, sizeof(bar));
+		else
+			tl_url_format_bar(&a->urls, bar, sizeof(bar));
+		tl_render_bar(&a->font, &a->term.pal, b->pixels, b->width,
+			b->height, a->pad, a->term.rows - 1, a->term.cols, bar);
+		if (!full && a->buf_dirty[idx] != NULL && a->term.rows > 0)
+			a->buf_dirty[idx][a->term.rows - 1] = true;
+	}
 	if (show_preedit) {
 		struct tl_preedit pe = {
 			a->preedit_text, a->preedit_cbeg, a->preedit_cend
@@ -641,6 +665,17 @@ static void handle_term_osc(struct app *a)
 				local != NULL ? local_len : 0);
 		}
 	}
+	if (a->term.notify.pending) {
+		bool allow = false;
+		if (a->notify_policy == TL_NOTIFY_ALWAYS)
+			allow = !a->term.notify.only_unfocused || !a->focused;
+		else if (a->notify_policy == TL_NOTIFY_UNFOCUSED)
+			allow = !a->focused;
+		if (allow)
+			(void)tl_action_notify(&a->actions, &a->term.notify,
+				NULL, 0);
+		tl_term_notify_clear(&a->term);
+	}
 }
 
 static void start_paste(struct app *a, bool primary)
@@ -784,7 +819,163 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 		return;
 	}
 	unsigned mods = tl_kbd_mods(&a->kbd);
+	if (a->urls.active) {
+		if (code == TL_KEY_ESC ||
+		    (mods == TL_MOD_CTRL &&
+		     (code == TL_KEY_C || code == TL_KEY_G))) {
+			tl_url_end(&a->urls);
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if (code == TL_KEY_BACKSPACE) {
+			tl_url_pop(&a->urls);
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if (!tl_key_is_modifier(code) &&
+		    (mods & (TL_MOD_CTRL | TL_MOD_ALT | TL_MOD_META)) == 0) {
+			struct tl_key_modes m = key_modes(a);
+			uint32_t sym = tl_key_char(code, mods & ~TL_MOD_SHIFT,
+				&m);
+			if (sym >= 0x20u && sym < 0x7fu) {
+				const char *uri = NULL;
+				enum tl_url_step st = tl_url_feed(&a->urls,
+					(char)sym, &uri);
+				if (st == TL_URL_MATCHED && uri != NULL) {
+					char copy[TL_LINK_URI_MAX + 1];
+					snprintf(copy, sizeof(copy), "%s", uri);
+					tl_url_end(&a->urls);
+					if (mods & TL_MOD_SHIFT) {
+						size_t n = strlen(copy);
+						tl_window_set_clipboard(&a->win,
+							copy, n);
+						tl_window_set_primary(&a->win,
+							copy, n);
+					} else {
+						(void)tl_action_open_url(copy);
+					}
+					tl_term_mark_all(&a->term);
+					draw(a, false);
+				} else if (st == TL_URL_PENDING) {
+					tl_term_mark_all(&a->term);
+					draw(a, false);
+				}
+			}
+		}
+		return;
+	}
+	if (a->search.active) {
+		if (code == TL_KEY_ESC ||
+		    (mods == TL_MOD_CTRL &&
+		     (code == TL_KEY_C || code == TL_KEY_G))) {
+			int saved = a->search.saved_view_offset;
+			tl_search_end(&a->search);
+			if (!a->term.alt_screen) {
+				if (saved > a->term.sb_len)
+					saved = a->term.sb_len;
+				if (saved < 0)
+					saved = 0;
+				a->term.view_offset = saved;
+			}
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if ((code == TL_KEY_ENTER || code == TL_KEY_KPENTER) &&
+		    (mods & TL_MOD_SHIFT) == 0) {
+			const struct tl_search_match *m =
+				tl_search_current(&a->search);
+			if (m != NULL) {
+				tl_sel_start(&a->sel, &a->term, m->x0, m->abs_y,
+					TL_SEL_CHAR);
+				tl_sel_update(&a->sel, &a->term, m->x1,
+					m->abs_y);
+				tl_sel_end(&a->sel);
+				size_t slen = 0;
+				char *text = tl_sel_extract(&a->term, &a->sel,
+					&slen);
+				if (text != NULL && slen > 0)
+					tl_window_set_primary(&a->win, text,
+						slen);
+				free(text);
+			}
+			tl_search_end(&a->search);
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if (code == TL_KEY_UP ||
+		    ((code == TL_KEY_ENTER || code == TL_KEY_KPENTER) &&
+		     (mods & TL_MOD_SHIFT) != 0) ||
+		    (code == TL_KEY_R && (mods & TL_MOD_CTRL) != 0)) {
+			tl_search_next(&a->search, -1);
+			tl_search_sync_view(&a->search, &a->term);
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if (code == TL_KEY_DOWN ||
+		    (mods == TL_MOD_CTRL &&
+		     (code == TL_KEY_S || code == TL_KEY_N))) {
+			tl_search_next(&a->search, 1);
+			tl_search_sync_view(&a->search, &a->term);
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if (code == TL_KEY_BACKSPACE) {
+			tl_search_pop_cp(&a->search, &a->term);
+			tl_search_sync_view(&a->search, &a->term);
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if (mods == TL_MOD_CTRL && code == TL_KEY_W) {
+			tl_search_pop_word(&a->search, &a->term);
+			tl_search_sync_view(&a->search, &a->term);
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if (mods == TL_MOD_CTRL && code == TL_KEY_U) {
+			tl_search_clear_query(&a->search, &a->term);
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+			return;
+		}
+		if (!tl_key_is_modifier(code) &&
+		    (mods & (TL_MOD_CTRL | TL_MOD_ALT | TL_MOD_META)) == 0) {
+			struct tl_key_modes m = key_modes(a);
+			uint32_t sym = tl_key_char(code, mods, &m);
+			if (sym != 0 && !(sym & TL_KEY_DEAD_BIT)) {
+				tl_search_push_cp(&a->search, &a->term, sym);
+				tl_search_sync_view(&a->search, &a->term);
+				tl_term_mark_all(&a->term);
+				draw(a, false);
+			}
+		}
+		return;
+	}
 	int page = a->term.rows / 2 > 0 ? a->term.rows / 2 : 1;
+	if (code == TL_KEY_R && mods == (TL_MOD_CTRL | TL_MOD_SHIFT)) {
+		trace_shortcut(a, code, "search");
+		tl_url_end(&a->urls);
+		tl_search_start(&a->search, &a->term);
+		tl_term_mark_all(&a->term);
+		draw(a, false);
+		return;
+	}
+	if (code == TL_KEY_O && mods == (TL_MOD_CTRL | TL_MOD_SHIFT)) {
+		trace_shortcut(a, code, "url-mode");
+		tl_search_end(&a->search);
+		if (tl_url_start(&a->urls, &a->term) > 0) {
+			tl_term_mark_all(&a->term);
+			draw(a, false);
+		}
+		return;
+	}
 	if (code == TL_KEY_PAGEUP && mods == TL_MOD_SHIFT) {
 		trace_shortcut(a, code, "scroll-up");
 		tl_term_scroll_view(&a->term, page);
@@ -977,6 +1168,14 @@ static void on_pointer_button(void *ud, uint32_t button, bool pressed,
 	}
 	if (button == TL_BTN_LEFT) {
 		if (pressed) {
+			if ((tl_kbd_mods(&a->kbd) & TL_MOD_CTRL) != 0) {
+				const char *uri = tl_term_link_uri(&a->term,
+					a->ptr_cx, view_abs_y(a, a->ptr_cy));
+				if (uri != NULL) {
+					(void)tl_action_open_url(uri);
+					return;
+				}
+			}
 			if (time - a->last_click_time <= 400)
 				a->click_count = (a->click_count % 3) + 1;
 			else
@@ -1096,6 +1295,15 @@ static void on_ime_commit(void *ud, const char *text, size_t len)
 	struct app *a = ud;
 	if (text == NULL || len == 0)
 		return;
+	if (a->search.active) {
+		tl_search_push_utf8(&a->search, &a->term, text, len);
+		tl_search_sync_view(&a->search, &a->term);
+		tl_term_mark_all(&a->term);
+		draw(a, false);
+		return;
+	}
+	if (a->urls.active)
+		return;
 	tl_term_reset_view(&a->term);
 	tl_compose_reset(&a->compose);
 	(void)tl_pty_queue(&a->pty, text, len);
@@ -1171,6 +1379,8 @@ int main(int argc, char **argv)
 	const char *term_name = NULL;
 	enum tl_osc52_policy osc52_cli = TL_OSC52_WRITE;
 	bool osc52_set = false;
+	enum tl_notify_policy notify_cli = TL_NOTIFY_UNFOCUSED;
+	bool notify_set = false;
 	float pt = 0;
 	bool pt_set = false;
 	bool keys_mode = false;
@@ -1212,6 +1422,13 @@ int main(int argc, char **argv)
 				return 2;
 			}
 			osc52_set = true;
+		} else if (strcmp(s, "--notify") == 0 && i + 1 < argc) {
+			if (tl_notify_policy_parse(argv[++i], &notify_cli) != 0) {
+				fprintf(stderr, "tam-last: bad notify policy: %s\n",
+					argv[i]);
+				return 2;
+			}
+			notify_set = true;
 		} else if (strcmp(s, "--keys") == 0) {
 			keys_mode = true;
 		} else if (strcmp(s, "-v") == 0 || strcmp(s, "--version") == 0) {
@@ -1290,6 +1507,8 @@ int main(int argc, char **argv)
 	}
 	tl_term_set_palette(&a.term, &a.cfg.pal);
 	tl_term_set_osc52_policy(&a.term, osc52_set ? osc52_cli : a.cfg.osc52);
+	tl_actions_init(&a.actions);
+	a.notify_policy = notify_set ? notify_cli : a.cfg.notify;
 	a.pad = a.pad_logical;
 	int init_rows = DEFAULT_ROWS + (a.keys_mode ? TL_KEYS_BAR_ROWS : 0);
 	a.width = a.lw = DEFAULT_COLS * a.font.cell_w + 2 * a.pad_logical;
@@ -1361,6 +1580,9 @@ int main(int argc, char **argv)
 			if (timeout < 0 || sm < timeout)
 				timeout = sm;
 		}
+		int am = tl_action_next_timeout_ms(&a.actions);
+		if (am >= 0 && (timeout < 0 || am < timeout))
+			timeout = am;
 
 		if (poll(fds, 5, timeout) < 0 && errno != EINTR) {
 			perror("tam-last: poll");
@@ -1388,6 +1610,7 @@ int main(int argc, char **argv)
 				;
 			if (!child_done)
 				child_done = reap(&a, &status);
+			tl_action_reap(&a.actions);
 		}
 
 		if (a.paste_fd >= 0 &&
@@ -1409,6 +1632,7 @@ int main(int argc, char **argv)
 			a.term.sync_output = false;
 			a.sync_armed = false;
 		}
+		(void)tl_action_check_deadlines(&a.actions);
 
 		/* Done when the program has exited, or nothing can write to
 		 * the terminal any more. */
@@ -1431,6 +1655,9 @@ int main(int argc, char **argv)
 
 	if (!child_done)
 		kill(-a.pty.pid, SIGHUP);
+	tl_actions_kill_all(&a.actions);
+	tl_search_free(&a.search);
+	tl_url_end(&a.urls);
 	if (a.paste_fd >= 0)
 		close(a.paste_fd);
 	if (a.osc52_fd >= 0)

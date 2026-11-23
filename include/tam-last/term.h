@@ -49,6 +49,34 @@ enum tl_mouse_mode {
 #define TL_LINK_MAX 256
 #define TL_LINK_URI_MAX 2048
 #define TL_REPLY_MAX 4096
+#define TL_NOTIFY_TITLE_MAX 256
+#define TL_NOTIFY_BODY_MAX 2048
+#define TL_NOTIFY_ID_MAX 64
+
+enum tl_notify_urgency {
+	TL_NOTIFY_LOW = 0,
+	TL_NOTIFY_NORMAL = 1,
+	TL_NOTIFY_CRITICAL = 2
+};
+
+struct tl_notify {
+	bool pending;
+	bool only_unfocused;
+	enum tl_notify_urgency urgency;
+	char title[TL_NOTIFY_TITLE_MAX];
+	char body[TL_NOTIFY_BODY_MAX];
+};
+
+struct tl_notify_acc {
+	bool active;
+	bool only_unfocused;
+	enum tl_notify_urgency urgency;
+	char id[TL_NOTIFY_ID_MAX];
+	char title[TL_NOTIFY_TITLE_MAX];
+	size_t title_len;
+	char body[TL_NOTIFY_BODY_MAX];
+	size_t body_len;
+};
 
 struct tl_palette {
 	uint32_t fg, bg, cursor, cursor_text;
@@ -161,6 +189,9 @@ struct tl_term {
 	bool osc52_read_prim;
 	bool osc52_read_st;
 	char osc52_read_target[16];
+	/* Desktop notifications (OSC 777 and OSC 99). */
+	struct tl_notify notify;
+	struct tl_notify_acc notify_acc;
 	bool dirty;
 	bool full_dirty;
 	bool *dirty_rows;
@@ -187,6 +218,8 @@ void tl_term_reply(struct tl_term *t, const void *data, size_t len);
 void tl_term_mark_all(struct tl_term *t);
 /* Clear a consumed OSC 52 write request. */
 void tl_term_osc52_clear_write(struct tl_term *t);
+/* Clear a consumed desktop notification request. */
+void tl_term_notify_clear(struct tl_term *t);
 /* Look up an OSC 8 hyperlink by id or cell coordinate. */
 const struct tl_link *tl_term_link(const struct tl_term *t, uint32_t link_id);
 const char *tl_term_link_uri(const struct tl_term *t, int x, int abs_y);

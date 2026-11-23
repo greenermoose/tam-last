@@ -170,6 +170,8 @@ static void reset(struct tl_term *t)
 	t->title_dirty = true;
 	tl_term_osc52_clear_write(t);
 	t->osc52_read_pending = false;
+	memset(&t->notify, 0, sizeof(t->notify));
+	memset(&t->notify_acc, 0, sizeof(t->notify_acc));
 	t->pal = t->default_pal;
 	t->pen = (struct tl_pen){ TL_COLOR_DEFAULT, TL_COLOR_DEFAULT, 0, 0 };
 	t->cx = t->cy = 0;
@@ -1161,4 +1163,9 @@ const struct tl_cell *tl_term_view_row(const struct tl_term *t, int y,
 	}
 	int abs_y = t->sb_len - t->view_offset + y;
 	return tl_term_abs_row(t, abs_y, out_cols);
+}
+
+void tl_term_notify_clear(struct tl_term *t)
+{
+	memset(&t->notify, 0, sizeof(t->notify));
 }

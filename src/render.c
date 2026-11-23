@@ -103,8 +103,8 @@ static void draw_glyph(struct tl_font *f, uint32_t cp, int span, uint8_t style,
 
 void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
-	int pad, bool focused, const struct tl_sel *sel, const bool *rows,
-	bool full)
+	int pad, bool focused, const struct tl_sel *sel,
+	const struct tl_search *search, const bool *rows, bool full)
 {
 	int cw = f->cell_w, ch = f->cell_h;
 	int line_h = ch / 14 > 0 ? ch / 14 : 1;
@@ -139,6 +139,15 @@ void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 			bool selected = sel != NULL && tl_sel_contains(sel, x, abs_y);
 			if (((c->attrs & TL_ATTR_INVERSE) != 0) ^ selected) {
 				uint32_t tmp = fg; fg = bg; bg = tmp;
+			}
+			int match_st = search != NULL ?
+				tl_search_cell_state(search, x, abs_y) : 0;
+			if (match_st == 2) {
+				fg = pal->index[0];
+				bg = pal->index[11];
+			} else if (match_st == 1) {
+				fg = pal->index[0];
+				bg = pal->index[3];
 			}
 			if (cursor_here && t->cursor_style == TL_CURSOR_BLOCK) {
 				fg = pal->cursor_text;
@@ -198,7 +207,45 @@ void tl_render(const struct tl_term *t, struct tl_font *f,
 	int pad, bool focused)
 {
 	tl_render_rows(t, f, pal, pixels, width, height, pad, focused, NULL,
-		NULL, true);
+		NULL, NULL, true);
+}
+
+static uint32_t utf8_next(const char *s, size_t len, size_t *pos);
+
+void tl_render_urls(const struct tl_term *t, struct tl_font *f,
+	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
+	int pad, const struct tl_url_mode *urls)
+{
+	if (urls == NULL || !urls->active || urls->count == 0)
+		return;
+	int cw = f->cell_w, ch = f->cell_h;
+	int line_h = ch / 14 > 0 ? ch / 14 : 1;
+	for (size_t i = 0; i < urls->count; i++) {
+		const struct tl_url_item *it = &urls->items[i];
+		if (it->row < 0 || it->row >= t->rows)
+			continue;
+		if (urls->typed_len > 0 &&
+		    strncmp(it->label, urls->typed, urls->typed_len) != 0)
+			continue;
+		int x0 = it->x0 < 0 ? 0 : it->x0;
+		int x1 = it->x1 >= t->cols ? t->cols - 1 : it->x1;
+		int py0 = pad + it->row * ch;
+		if (x1 >= x0) {
+			rect(pixels, width, height, pad + x0 * cw,
+				py0 + f->baseline + line_h,
+				(x1 - x0 + 1) * cw, line_h, pal->index[3]);
+		}
+		for (int k = 0; it->label[k] != '\0' && x0 + k < t->cols; k++) {
+			int px0 = pad + (x0 + k) * cw;
+			bool matched = (size_t)k < urls->typed_len;
+			uint32_t bg = matched ? pal->index[1] : pal->index[3];
+			uint32_t fg = matched ? pal->index[15] : pal->index[0];
+			rect(pixels, width, height, px0, py0, cw, ch, bg);
+			draw_glyph(f, (unsigned char)it->label[k], 1,
+				TL_STYLE_BOLD, fg, pixels, width, height,
+				px0, py0);
+		}
+	}
 }
 
 void tl_render_bar(struct tl_font *f, const struct tl_palette *pal,
@@ -214,11 +261,23 @@ void tl_render_bar(struct tl_font *f, const struct tl_palette *pal,
 	rect(pixels, width, height, 0, py0, width, ch, bg);
 	if (text == NULL)
 		return;
-	for (int x = 0; x < cols && text[x] != '\0'; x++) {
-		unsigned char c = (unsigned char)text[x];
-		if (c > ' ' && c <= 0x7e)
-			draw_glyph(f, c, 1, TL_STYLE_REGULAR, fg, pixels,
+	size_t len = strlen(text);
+	size_t pos = 0;
+	int x = 0;
+	while (pos < len && x < cols) {
+		uint32_t cp = utf8_next(text, len, &pos);
+		int w = wcwidth((wchar_t)cp);
+		if (w < 0)
+			w = 1;
+		if (w == 0)
+			continue;
+		int span = w > 1 ? 2 : 1;
+		if (x + span > cols)
+			break;
+		if (cp > ' ')
+			draw_glyph(f, cp, span, TL_STYLE_REGULAR, fg, pixels,
 				width, height, pad + x * cw, py0);
+		x += span;
 	}
 }
 

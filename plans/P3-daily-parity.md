@@ -1,6 +1,6 @@
 # P3: Daily parity with foot (0.2.x)
 
-**Status:** in progress (0.2.0–0.2.1 implemented).
+**Status:** in progress (0.2.0–0.2.2 implemented).
 
 ## Goal
 
@@ -30,5 +30,7 @@ Everything Fred uses foot for each day works in tam-last.
 
 ## Open points
 
-- Which notification path, given Tamlinux's Quickshell shell.
+- Notification path: resolved in 0.2.2 (`notify-send` integrates natively
+  with Tamlinux's Quickshell `org.freedesktop.Notifications` service,
+  defaulting to `notify=unfocused`).
 - Whether Fred wants Sixel or kitty graphics at all (foot has Sixel).

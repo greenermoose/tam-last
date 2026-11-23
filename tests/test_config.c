@@ -137,5 +137,21 @@ int main(int argc, char **argv)
 	CHECK(tl_config_load_string(&cfg, "[main]\nterm = has space\n") == 0 &&
 		strcmp(cfg.term, "tam-last") == 0);
 
+	/* Notification policy (default unfocused). */
+	tl_config_default(&cfg);
+	CHECK(cfg.notify == TL_NOTIFY_UNFOCUSED);
+	CHECK(tl_config_load_string(&cfg, "[main]\nnotify = yes\n") == 0 &&
+		cfg.notify == TL_NOTIFY_ALWAYS);
+	CHECK(tl_config_load_string(&cfg, "[main]\nnotify = always\n") == 0 &&
+		cfg.notify == TL_NOTIFY_ALWAYS);
+	CHECK(tl_config_load_string(&cfg, "[main]\nnotify = no\n") == 0 &&
+		cfg.notify == TL_NOTIFY_DISABLED);
+	CHECK(tl_config_load_string(&cfg, "[main]\nnotify = disabled\n") == 0 &&
+		cfg.notify == TL_NOTIFY_DISABLED);
+	CHECK(tl_config_load_string(&cfg, "[main]\nnotify = unfocused\n") == 0 &&
+		cfg.notify == TL_NOTIFY_UNFOCUSED);
+	CHECK(tl_config_load_string(&cfg, "[main]\nnotify = bogus\n") == 0 &&
+		cfg.notify == TL_NOTIFY_UNFOCUSED);
+
 	CHECK_DONE("test_config");
 }

@@ -605,6 +605,201 @@ static void osc_clipboard(struct tl_term *t, const char *s, size_t len, bool st)
 	t->osc52_write_pending = true;
 }
 
+static size_t append_sanitized(char *dst, size_t cap, size_t cur,
+	const char *src, size_t len, bool allow_nl)
+{
+	if (cap == 0)
+		return 0;
+	size_t w = cur;
+	for (size_t i = 0; i < len && w + 1 < cap; i++) {
+		unsigned char c = (unsigned char)src[i];
+		if (c == '\r')
+			continue;
+		if (c == '\n') {
+			if (allow_nl)
+				dst[w++] = '\n';
+			continue;
+		}
+		if (c < 0x20u || c == 0x7fu)
+			continue;
+		dst[w++] = (char)c;
+	}
+	/* Avoid splitting a multi-byte UTF-8 sequence at the truncation edge. */
+	if (w == cap - 1 && len > 0) {
+		size_t k = w;
+		while (k > cur && ((unsigned char)dst[k - 1] & 0xc0u) == 0x80u)
+			k--;
+		if (k > cur && (unsigned char)dst[k - 1] >= 0xc0u) {
+			unsigned char lead = (unsigned char)dst[k - 1];
+			size_t need = (lead & 0xe0u) == 0xc0u ? 2 :
+				(lead & 0xf0u) == 0xe0u ? 3 :
+				(lead & 0xf8u) == 0xf0u ? 4 : 1;
+			if (w - (k - 1) < need)
+				w = k - 1;
+		}
+	}
+	dst[w] = '\0';
+	return w;
+}
+
+static void osc_notify_777(struct tl_term *t, const char *s, size_t len)
+{
+	/* Format: notify;<title>;<body> */
+	const char *s1 = memchr(s, ';', len);
+	if (s1 == NULL)
+		return;
+	size_t cmd_len = (size_t)(s1 - s);
+	if (cmd_len != 6 || memcmp(s, "notify", 6) != 0)
+		return;
+
+	const char *rest = s1 + 1;
+	size_t rlen = len - cmd_len - 1;
+	const char *s2 = memchr(rest, ';', rlen);
+	const char *title = rest;
+	size_t tlen = s2 != NULL ? (size_t)(s2 - rest) : rlen;
+	const char *body = s2 != NULL ? s2 + 1 : "";
+	size_t blen = s2 != NULL ? rlen - tlen - 1 : 0;
+
+	struct tl_notify n;
+	memset(&n, 0, sizeof(n));
+	n.urgency = TL_NOTIFY_NORMAL;
+	(void)append_sanitized(n.title, sizeof(n.title), 0, title, tlen, false);
+	(void)append_sanitized(n.body, sizeof(n.body), 0, body, blen, true);
+	if (n.title[0] == '\0' && n.body[0] == '\0')
+		return;
+	n.pending = true;
+	t->notify = n;
+}
+
+static void osc_notify_99(struct tl_term *t, const char *s, size_t len)
+{
+	/* Format: <meta>;<payload> where meta is ':'-separated k=v pairs. */
+	const char *semi = memchr(s, ';', len);
+	if (semi == NULL)
+		return;
+	const char *meta = s;
+	size_t mlen = (size_t)(semi - s);
+	const char *payload = semi + 1;
+	size_t plen = len - mlen - 1;
+
+	bool is_body = false;
+	bool done = true;
+	bool b64 = false;
+	bool has_urg = false;
+	enum tl_notify_urgency urg = TL_NOTIFY_NORMAL;
+	bool has_occ = false;
+	bool only_unfocused = false;
+	const char *id = NULL;
+	size_t id_len = 0;
+
+	size_t pos = 0;
+	while (pos < mlen) {
+		const char *colon = memchr(meta + pos, ':', mlen - pos);
+		size_t seg_len = colon != NULL ?
+			(size_t)(colon - (meta + pos)) : (mlen - pos);
+		const char *seg = meta + pos;
+		const char *eq = memchr(seg, '=', seg_len);
+		if (eq != NULL) {
+			size_t klen = (size_t)(eq - seg);
+			const char *val = eq + 1;
+			size_t vlen = seg_len - klen - 1;
+			if (klen == 1 && seg[0] == 'p') {
+				if (vlen == 4 && memcmp(val, "body", 4) == 0)
+					is_body = true;
+				else if (vlen == 5 && memcmp(val, "title", 5) == 0)
+					is_body = false;
+			} else if (klen == 1 && seg[0] == 'd' && vlen == 1) {
+				if (val[0] == '0')
+					done = false;
+				else if (val[0] == '1')
+					done = true;
+			} else if (klen == 1 && seg[0] == 'e' && vlen == 1) {
+				if (val[0] == '1')
+					b64 = true;
+				else if (val[0] == '0')
+					b64 = false;
+			} else if (klen == 1 && seg[0] == 'u' && vlen == 1) {
+				if (val[0] == '0') {
+					urg = TL_NOTIFY_LOW;
+					has_urg = true;
+				} else if (val[0] == '1') {
+					urg = TL_NOTIFY_NORMAL;
+					has_urg = true;
+				} else if (val[0] == '2') {
+					urg = TL_NOTIFY_CRITICAL;
+					has_urg = true;
+				}
+			} else if (klen == 1 && seg[0] == 'o') {
+				if (vlen == 9 && memcmp(val, "unfocused", 9) == 0) {
+					only_unfocused = true;
+					has_occ = true;
+				} else if (vlen == 6 && memcmp(val, "always", 6) == 0) {
+					only_unfocused = false;
+					has_occ = true;
+				}
+			} else if (klen == 1 && seg[0] == 'i' && vlen > 0) {
+				id = val;
+				id_len = vlen;
+			}
+		}
+		pos += seg_len + (colon != NULL ? 1 : 0);
+	}
+
+	char *decoded = NULL;
+	const char *text = payload;
+	size_t text_len = plen;
+	if (b64) {
+		if (tl_base64_decode(payload, plen, &decoded, &text_len) != 0)
+			return;
+		text = decoded;
+	}
+
+	struct tl_notify_acc *acc = &t->notify_acc;
+	bool same_id = acc->active && id != NULL &&
+		id_len == strlen(acc->id) &&
+		memcmp(acc->id, id, id_len) == 0;
+	bool continue_anon = acc->active && id == NULL && acc->id[0] == '\0';
+	if (!same_id && !continue_anon) {
+		memset(acc, 0, sizeof(*acc));
+		acc->active = true;
+		acc->urgency = TL_NOTIFY_NORMAL;
+		if (id != NULL) {
+			size_t copy = id_len < sizeof(acc->id) - 1 ?
+				id_len : sizeof(acc->id) - 1;
+			memcpy(acc->id, id, copy);
+			acc->id[copy] = '\0';
+		}
+	}
+	if (has_urg)
+		acc->urgency = urg;
+	if (has_occ)
+		acc->only_unfocused = only_unfocused;
+
+	if (is_body) {
+		acc->body_len = append_sanitized(acc->body, sizeof(acc->body),
+			acc->body_len, text, text_len, true);
+	} else {
+		acc->title_len = append_sanitized(acc->title,
+			sizeof(acc->title), acc->title_len, text, text_len,
+			false);
+	}
+	free(decoded);
+
+	if (done) {
+		if (acc->title[0] != '\0' || acc->body[0] != '\0') {
+			struct tl_notify n;
+			memset(&n, 0, sizeof(n));
+			n.pending = true;
+			n.only_unfocused = acc->only_unfocused;
+			n.urgency = acc->urgency;
+			memcpy(n.title, acc->title, sizeof(n.title));
+			memcpy(n.body, acc->body, sizeof(n.body));
+			t->notify = n;
+		}
+		memset(acc, 0, sizeof(*acc));
+	}
+}
+
 void tl_term_osc(struct tl_term *t, const char *data, size_t len, bool st)
 {
 	if (len == 0)
@@ -647,6 +842,10 @@ void tl_term_osc(struct tl_term *t, const char *data, size_t len, bool st)
 		if (semi != NULL)
 			osc_clipboard(t, rest, rest_len, st);
 		break;
+	case 99:
+		if (semi != NULL)
+			osc_notify_99(t, rest, rest_len);
+		break;
 	case 104:
 		osc_reset_palette(t, rest, rest_len);
 		break;
@@ -661,6 +860,10 @@ void tl_term_osc(struct tl_term *t, const char *data, size_t len, bool st)
 	case 112:
 		t->pal.cursor = t->default_pal.cursor;
 		tl_term_mark_all(t);
+		break;
+	case 777:
+		if (semi != NULL)
+			osc_notify_777(t, rest, rest_len);
 		break;
 	default:
 		break;

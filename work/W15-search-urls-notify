@@ -1,0 +1,65 @@
+W15 SCROLLBACK SEARCH, URL MODE, AND DESKTOP NOTIFICATIONS (0.2.2)
+
+Date: 2026-11-23
+AI harness: agy
+AI model: Gemini 4 Neon (Medium)
+
+
+GUIDANCE
+
+  Fred: "/plan Do the next work slice of tam-last."
+  Fred: "1 yes / unfocused. Plan approved. Proceed."
+  Fred: "Pass. Commit and finish."
+
+
+DONE
+
+  - Added incremental scrollback search in include/tam-last/search.h and
+    src/search.c (smart-case UTF-8 matching, wide-character span support,
+    wrap-around navigation, viewport sync, match cap of 8192) bound to
+    Ctrl+Shift+R in src/main.c (Ctrl+R/Up/Shift+Enter prev,
+    Ctrl+S/Ctrl+N/Down next, Enter selects to primary, Esc/Ctrl+C/Ctrl+G
+    restores view_offset).
+  - Added keyboard URL mode in include/tam-last/url.h and src/url.c
+    (OSC 8 hyperlinks and plain-text https/http/ftp/ftps/file/mailto URLs,
+    balanced trailing punctuation trimming, allowlist validation,
+    prefix-free home-row hint labels) bound to Ctrl+Shift+O (Shift+key
+    copies to clipboard/primary instead of opening), plus Ctrl+Left-Click
+    on hovered OSC 8 hyperlinks.
+  - Added OSC 777 (notify;<title>;<body>) and OSC 99 (chunked, base64,
+    urgency, o=unfocused/always) parsing in include/tam-last/term.h,
+    src/term.c, and src/osc.c.
+  - Added bounded external action spawner in include/tam-last/action.h
+    and src/action.c for notify-send (4 concurrent max, 3000 ms monotonic
+    deadline, SIGKILL+reap on expiry, timeout-free poll when idle) and
+    detached xdg-open (never via a shell).
+  - Added notify=unfocused|yes|always|no|disabled (default unfocused) in
+    include/tam-last/config.h and src/config.c, plus --notify in
+    src/main.c.
+  - Added search match highlighting, URL underlines + hint badges, and
+    UTF-8 overlay bar rendering in include/tam-last/render.h and
+    src/render.c.
+  - Added tests/test_modes.c (77 checks) and expanded tests/test_vt.c
+    (431 checks), tests/test_config.c (62 checks), and tests/test_render.c
+    (91 checks).
+  - Added interactive sandbox/demo-daily (option c in sandbox/play,
+    documented in sandbox/README-sandbox).
+  - Bumped VERSION to 0.2.2 and updated plans/P3-daily-parity.md.
+  - Verified make test, make sanitize (ASan/UBSan + headless tam-pane),
+    readelf -d (libc and libm only), sh -n, and staged install/uninstall
+    with zero warnings.
+  - Fred tested and accepted tam-last 0.2.2 on 2026-11-23.
+
+
+FAILED
+
+  - None.
+
+
+HANDOFF
+
+  - Fred accepted 0.2.2 (scrollback search, keyboard URL mode, and
+    OSC 777/99 desktop notifications via notify-send) on 2026-11-23.
+  - Next milestone is Phase P3, 0.2.3 (server mode: one process, many
+    windows, shared font cache, instant start; see
+    plans/P3-daily-parity.md).

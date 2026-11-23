@@ -6,8 +6,10 @@
 #include <stdint.h>
 
 #include "tam-last/font.h"
+#include "tam-last/search.h"
 #include "tam-last/select.h"
 #include "tam-last/term.h"
+#include "tam-last/url.h"
 
 /* Draw t into a width x height XRGB8888 image with pad pixels of margin.
  * focused draws the active cursor, otherwise an outline. */
@@ -18,8 +20,13 @@ void tl_render(const struct tl_term *t, struct tl_font *f,
 /* Draw only the rows where rows[y] is true, or everything when full is true. */
 void tl_render_rows(const struct tl_term *t, struct tl_font *f,
 	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
-	int pad, bool focused, const struct tl_sel *sel, const bool *rows,
-	bool full);
+	int pad, bool focused, const struct tl_sel *sel,
+	const struct tl_search *search, const bool *rows, bool full);
+
+/* Draw URL mode underlines and hint badges overlaid on the grid. */
+void tl_render_urls(const struct tl_term *t, struct tl_font *f,
+	const struct tl_palette *pal, uint32_t *pixels, int width, int height,
+	int pad, const struct tl_url_mode *urls);
 
 /* Draw a single-row status/overlay bar (e.g. for --keys) at grid row y_row. */
 void tl_render_bar(struct tl_font *f, const struct tl_palette *pal,

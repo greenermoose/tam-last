@@ -44,6 +44,8 @@ IN THIS REPOSITORY
                                OSC 4/10/11/12/104 color queries and live swaps
     ./sandbox/demo-queries     0.2.1: DA2, XTVERSION, DECRQM, DEC 2026
                                synchronized output, and tam-last terminfo
+    ./sandbox/demo-daily       0.2.2: scrollback search (Ctrl+Shift+R), URL
+                               mode (Ctrl+Shift+O), and OSC 777/99 notifications
     sandbox/theme-gruvbox.ini  sample tam_ini config (Gruvbox, 11 pt)
 
   Pass --in-term to any demo script to run it in the current terminal

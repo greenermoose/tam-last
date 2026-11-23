@@ -3,49 +3,48 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-23, with W14
+Updated: 2026-11-23, with W15
 
 
 STATE
 
-  Version 0.2.1 on branch dev (Phase P3; Fred accepted 0.2.1 on
-  2026-11-23, W14). Implemented and verified:
-  - Synchronized output (DEC private mode 2026 — BSU/ESU): CSI ? 2026 h
-    defers presentation in src/main.c while mutations accumulate in
-    struct tl_term, CSI ? 2026 l flushes atomically, RIS resets it, and
-    a 1000 ms safety deadline prevents hung programs from freezing the
-    window (poll() stays timeout-free when mode 2026 is off).
-  - DA2 (CSI > c / CSI > 0 c) replying \033[>1;<ver>;0c and XTVERSION
-    (CSI > q / CSI > 0 q) replying \033P>|tam-last(<version>)\033\\ in
-    src/term.c.
-  - DECRQM (CSI Ps $ p for ANSI mode 4 and CSI ? Ps $ p for DEC modes
-    1, 6, 7, 25, 47, 1000, 1002, 1003, 1006, 1047, 1049, 2004, 2026)
-    in src/term.c.
-  - Terminfo source terminfo/tam-last.ti defining tam-last (256-color +
-    Tc) and tam-last-direct (24-bit RGB), compiled/checked with tic -x /
-    infocmp -x in Makefile and installed under $(DESTDIR)$(TERMINFODIR).
-  - Auto-detect TERM=tam-last in src/pty.c (including ~/.local/share/
-    terminfo via TERMINFO_DIRS, falling back to xterm-256color when
-    uninstalled), plus term= in tam-last.ini and --term NAME on the CLI.
-  - Interactive sandbox/demo-queries (option b in sandbox/play).
+  Version 0.2.2 on branch dev (Phase P3; Fred accepted 0.2.2 on
+  2026-11-23, W15). Implemented and verified:
+  - Incremental scrollback search (include/tam-last/search.h,
+    src/search.c, Ctrl+Shift+R): smart-case UTF-8 and wide-character
+    matching across scrollback and live screen, match highlighting,
+    wrap-around Ctrl+R/Ctrl+S/Up/Down navigation, Enter to select to
+    primary, Esc to restore view_offset.
+  - Keyboard URL mode (include/tam-last/url.h, src/url.c, Ctrl+Shift+O):
+    detects visible OSC 8 hyperlinks and plain-text URLs with balanced
+    punctuation trimming and scheme allowlisting, overlays prefix-free
+    home-row hint labels, opens via xdg-open (Shift+key copies instead),
+    plus Ctrl+Left-Click on hovered OSC 8 links.
+  - Desktop notifications (OSC 777 and OSC 99 in src/osc.c,
+    include/tam-last/action.h, src/action.c): dispatched via notify-send
+    (integrating with Quickshell's freedesktop notification service) with
+    a 4-process concurrency cap and 3000 ms monotonic deadline; poll()
+    stays timeout-free when idle. Policy notify=unfocused|yes|no in
+    tam-last.ini (default unfocused) and --notify on the CLI.
+  - Interactive sandbox/demo-daily (option c in sandbox/play).
 
-  make test (test_wire 173, test_vt 405, test_ttf 3036, test_keys 266,
-  test_render 89, test_config 55, version 0.2.1, terminfo tam-last &
-  tam-last-direct, headless tam-pane), ASan/UBSan sanitize tests,
-  readelf -d (libc and libm only), staged install/uninstall, and
-  idol-check all pass with zero warnings.
+  make test (test_wire 173, test_vt 431, test_ttf 3036, test_keys 266,
+  test_render 91, test_config 62, test_modes 77, version 0.2.2, terminfo
+  tam-last & tam-last-direct, headless tam-pane), ASan/UBSan sanitize
+  tests, readelf -d (libc and libm only), sh -n, and staged
+  install/uninstall all pass with zero warnings.
 
 
 NEXT
 
-  1. Phase P3, 0.2.2 (search in scrollback, URL mode, desktop
-     notifications; see plans/P3-daily-parity.md).
+  1. Phase P3, 0.2.3 (server mode: one process, many windows, shared font
+     cache, instant start; see plans/P3-daily-parity.md).
 
 
 WAITING FOR FRED
 
-  - Open points in the plans: kitty decoding in libtam (P2);
-    notification path and Sixel/kitty graphics (P3).
+  - Open points in the plans: kitty decoding in libtam (P2); Sixel/kitty
+    graphics (P3).
     (Layouts stay in tam-last for now and will lift into libtam when
     tam-pane reaches P6.)
 
