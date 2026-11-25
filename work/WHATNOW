@@ -3,10 +3,19 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-23, with W16
+Updated: 2026-11-25, with W17
 
 
 STATE
+
+  Version 0.2.4 on branch dev (W17):
+  - Honoured wl_keyboard.modifiers depressed bits in include/tam-last/keys.h,
+    src/keys/keymap.c, and src/main.c so synthetic chords (Hyprland
+    send_key_state, wtype) work without leaking physically held Meta, and
+    aligned Shift+Insert (CLIPBOARD paste) and Ctrl+Insert (CLIPBOARD copy)
+    with Tamlinux terminal conventions.
+  - Verified make test (test_keys 270, version 0.2.4, headless tam-pane)
+    and make sanitize (ASan/UBSan) pass with zero warnings.
 
   Version 0.2.3 on branch dev (Phase P3 complete; Fred accepted 0.2.3 on
   2026-11-23, W16). Implemented and verified:

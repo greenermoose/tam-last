@@ -1032,7 +1032,8 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 		draw(a, false);
 		return;
 	}
-	if (code == TL_KEY_C && mods == (TL_MOD_CTRL | TL_MOD_SHIFT)) {
+	if ((code == TL_KEY_C && mods == (TL_MOD_CTRL | TL_MOD_SHIFT)) ||
+	    (code == TL_KEY_INSERT && mods == TL_MOD_CTRL)) {
 		trace_shortcut(a, code, "copy");
 		size_t len = 0;
 		char *text = tl_sel_extract(&a->term, &a->sel, &len);
@@ -1048,9 +1049,9 @@ static void on_key(void *ud, uint32_t code, bool pressed)
 		return;
 	}
 	if (code == TL_KEY_INSERT && mods == TL_MOD_SHIFT) {
-		trace_shortcut(a, code, "paste-primary");
+		trace_shortcut(a, code, "paste");
 		tl_term_reset_view(&a->term);
-		start_paste(a, true);
+		start_paste(a, false);
 		return;
 	}
 	if (!tl_key_is_modifier(code))
@@ -1291,8 +1292,7 @@ static void on_focus_out(void *ud)
 
 static void on_modifiers(void *ud, uint32_t depressed, uint32_t locked)
 {
-	(void)depressed;
-	tl_kbd_locks(&((struct tl_session *)ud)->kbd, locked);
+	tl_kbd_modifiers(&((struct tl_session *)ud)->kbd, depressed, locked);
 }
 
 static void on_repeat_info(void *ud, int32_t rate, int32_t delay)

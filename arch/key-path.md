@@ -54,10 +54,11 @@ Wayland events on `wl_keyboard`:
 - `enter`: focus arrives, with the keys already held.
 - `key`: serial, time, the **evdev code unchanged** (29, then 46), and
   pressed or released.
-- `modifiers`: the compositor's view of modifiers and locks as XKB
-  masks. tam-last uses only the lock bits (Caps Lock is real modifier 1,
-  Num Lock is Mod2, bit 4), because locks change while another window
-  has the keyboard.
+- `modifiers`: the compositor's view of depressed modifiers and locks as
+  XKB real-modifier masks. tam-last tracks both the depressed bits
+  (so synthetic chords from compositor dispatchers and virtual keyboards
+  work alongside physical keys) and the lock bits (Caps Lock is real
+  modifier 1, Num Lock is Mod2, bit 4).
 - `repeat_info`: the repeat rate and delay. The compositor does not
   repeat keys for us; the client does.
 

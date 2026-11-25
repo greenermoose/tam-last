@@ -89,6 +89,8 @@ void tl_kbd_key(struct tl_kbd *k, uint32_t code, bool pressed)
 void tl_kbd_enter(struct tl_kbd *k, const uint32_t *codes, size_t n)
 {
 	memset(k->down, 0, sizeof(k->down));
+	k->depressed = 0;
+	k->have_mods = false;
 	for (size_t i = 0; i < n; i++)
 		tl_kbd_key(k, codes[i], true);
 }
@@ -96,6 +98,15 @@ void tl_kbd_enter(struct tl_kbd *k, const uint32_t *codes, size_t n)
 void tl_kbd_leave(struct tl_kbd *k)
 {
 	memset(k->down, 0, sizeof(k->down));
+	k->depressed = 0;
+	k->have_mods = false;
+}
+
+void tl_kbd_modifiers(struct tl_kbd *k, uint32_t depressed, uint32_t locked)
+{
+	k->depressed = depressed;
+	k->have_mods = true;
+	tl_kbd_locks(k, locked);
 }
 
 void tl_kbd_locks(struct tl_kbd *k, uint32_t locked)
@@ -113,6 +124,24 @@ unsigned tl_kbd_mods(const struct tl_kbd *k)
 {
 	unsigned m = 0;
 	bool has_altgr = k->layout != NULL && k->layout->has_altgr;
+	if (k->have_mods) {
+		if (k->depressed & TL_XKB_SHIFT)
+			m |= TL_MOD_SHIFT;
+		if (k->depressed & TL_XKB_CTRL)
+			m |= TL_MOD_CTRL;
+		if (k->depressed & TL_XKB_MOD4)
+			m |= TL_MOD_META;
+		if (has_altgr &&
+		    ((k->depressed & TL_XKB_MOD5) || held(k, TL_KEY_RIGHTALT))) {
+			m |= TL_MOD_ALTGR;
+			if ((k->depressed & TL_XKB_MOD1) &&
+			    (!held(k, TL_KEY_RIGHTALT) || held(k, TL_KEY_LEFTALT)))
+				m |= TL_MOD_ALT;
+		} else if (k->depressed & TL_XKB_MOD1) {
+			m |= TL_MOD_ALT;
+		}
+		return m;
+	}
 	if (held(k, TL_KEY_LEFTSHIFT) || held(k, TL_KEY_RIGHTSHIFT))
 		m |= TL_MOD_SHIFT;
 	if (held(k, TL_KEY_LEFTALT))

@@ -1,0 +1,45 @@
+W17 DEPRESSED MODIFIERS AND CLIPBOARD SHORTCUTS (0.2.4)
+
+Date: 2026-11-25
+AI harness: Antigravity CLI 1.5.17
+AI model: Gemini 4 Neon (Medium)
+Continues: W16
+
+
+GUIDANCE
+
+  Fred reported that in Tamlinux 0.6.40, Meta + Alt + R (tam-macro) printed
+  literal "v" in tam-last and Meta + Ctrl + V clipboard history did not
+  paste into tam-last.
+  Fred confirmed the live dev build fixed all clipboard/macro shortcuts and
+  directed: "Bump tam-last to 0.2.4, commit it, install it, and release
+  your work claim to it."
+
+
+DONE
+
+  - Added XKB real-modifier bit constants (TL_XKB_SHIFT, TL_XKB_CTRL,
+    TL_XKB_MOD1, TL_XKB_MOD4, TL_XKB_MOD5) and tl_kbd_modifiers() in
+    include/tam-last/keys.h and src/keys/keymap.c so tl_kbd_mods() tracks
+    compositor-reported depressed modifiers alongside physical keys and
+    locks (cleared on enter/leave), enabling synthetic chords from
+    Hyprland send_key_state and wtype without leaking physically held Meta.
+  - Wired on_modifiers() in src/main.c to tl_kbd_modifiers().
+  - Aligned clipboard shortcuts in src/main.c with Tamlinux terminal
+    conventions: Shift + Insert pastes from CLIPBOARD and Ctrl + Insert
+    copies to CLIPBOARD alongside Ctrl + Shift + V/C.
+  - Added synthetic-modifier unit tests in tests/test_keys.c (270 checks)
+    and updated arch/key-path.md.
+  - Bumped VERSION to 0.2.4 and verified make test and make sanitize
+    (ASan/UBSan + headless tam-pane) pass with zero warnings.
+
+
+FAILED
+
+  - Nothing.
+
+
+HANDOFF
+
+  - Ready on dev (0.2.4) and installed to ~/.local/bin/tam-last; ready to
+    be pinned in the next Tamlinux candidate on Fred's word.

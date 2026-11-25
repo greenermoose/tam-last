@@ -167,6 +167,21 @@ int main(void)
 	tl_kbd_locks(&k, TL_XKB_MOD2);
 	CHECK(!k.caps && k.num);
 
+	/* Compositor depressed modifiers (synthetic shortcuts such as
+	 * Hyprland send_key_state or wtype without physical modifier keys). */
+	tl_kbd_init(&k);
+	tl_kbd_modifiers(&k, TL_XKB_CTRL | TL_XKB_SHIFT, 0);
+	CHECK(tl_kbd_mods(&k) == (TL_MOD_CTRL | TL_MOD_SHIFT));
+	/* Synthetic chord overrides physically held Meta so Meta+V / Meta+R
+	 * do not leak Meta into the injected paste chord. */
+	tl_kbd_key(&k, TL_KEY_LEFTMETA, true);
+	tl_kbd_modifiers(&k, TL_XKB_SHIFT, 0);
+	CHECK(tl_kbd_mods(&k) == TL_MOD_SHIFT);
+	tl_kbd_modifiers(&k, 0, TL_XKB_LOCK);
+	CHECK(tl_kbd_mods(&k) == 0 && k.caps && !k.num);
+	tl_kbd_leave(&k);
+	CHECK(tl_kbd_mods(&k) == 0 && !k.have_mods);
+
 	/* The layout. */
 	CHECK(tl_keymap_us(TL_KEY_A, false, false) == 'a');
 	CHECK(tl_keymap_us(TL_KEY_A, true, false) == 'A');

@@ -19,10 +19,14 @@ enum {
 	TL_MOD_ALTGR = 16
 };
 
-/* XKB's fixed real-modifier bits, as wl_keyboard.modifiers reports them:
- * Lock is bit 1 and Mod2 (Num Lock in every standard keymap) is bit 4. */
-#define TL_XKB_LOCK (1u << 1)
-#define TL_XKB_MOD2 (1u << 4)
+/* XKB's fixed real-modifier bits, as wl_keyboard.modifiers reports them. */
+#define TL_XKB_SHIFT (1u << 0)
+#define TL_XKB_LOCK  (1u << 1)
+#define TL_XKB_CTRL  (1u << 2)
+#define TL_XKB_MOD1  (1u << 3)
+#define TL_XKB_MOD2  (1u << 4)
+#define TL_XKB_MOD4  (1u << 6)
+#define TL_XKB_MOD5  (1u << 7)
 
 #define TL_KEY_SEQ_MAX 64
 
@@ -92,6 +96,8 @@ extern const size_t tl_compose_rule_count_val;
 
 struct tl_kbd {
 	uint8_t down[TL_KEY_COUNT / 8];
+	uint32_t depressed;
+	bool have_mods;
 	bool caps, num;
 	const struct tl_layout *layout;
 };
@@ -102,6 +108,8 @@ void tl_kbd_key(struct tl_kbd *k, uint32_t code, bool pressed);
 /* Focus arrives with the keys already held. */
 void tl_kbd_enter(struct tl_kbd *k, const uint32_t *codes, size_t n);
 void tl_kbd_leave(struct tl_kbd *k);
+/* Modifier and lock states from wl_keyboard.modifiers. */
+void tl_kbd_modifiers(struct tl_kbd *k, uint32_t depressed, uint32_t locked);
 /* Lock states come from the compositor, since they change while another
  * window has the keyboard. */
 void tl_kbd_locks(struct tl_kbd *k, uint32_t locked);
