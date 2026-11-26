@@ -1,6 +1,14 @@
 /* Client/server Unix-domain socket IPC for tam-last --server and --client. */
 #include "tam-last/ipc.h"
 
+#include <tam.h>
+#include <tam_sock.h>
+
+/* tam_sock, tam_b64, tam_spawn_detached and tam_locale_init: 0.11.0. */
+#if TAM_VERSION_MAJOR == 0 && TAM_VERSION_MINOR < 11
+#error "tam-last needs libtam 0.11.0 or later"
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -360,58 +368,20 @@ int tl_ipc_listen(const char *path, char *err, size_t errlen)
 	if (make_sockaddr(&addr, path, err, errlen) != 0)
 		return -1;
 
-	/* Detect an already-running server vs a stale socket file. */
-	struct stat st;
-	if (lstat(path, &st) == 0) {
-		if (!S_ISSOCK(st.st_mode)) {
-			snprintf(err, errlen, "%s exists and is not a socket",
-				path);
-			return -1;
-		}
-		int probe = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (probe >= 0) {
-			fcntl(probe, F_SETFL, O_NONBLOCK);
-			int cr = connect(probe, (struct sockaddr *)&addr,
-				sizeof(addr));
-			int ce = errno;
-			close(probe);
-			if (cr == 0 || ce == EINPROGRESS || ce == EAGAIN) {
-				snprintf(err, errlen,
-					"server already running on %s", path);
-				return -1;
-			}
-		}
-		if (unlink(path) != 0) {
-			snprintf(err, errlen, "cannot remove stale socket %s: %s",
-				path, strerror(errno));
-			return -1;
-		}
-	}
-
-	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	/* tam_sock_listen removes only a stale socket: a running server, or
+	 * anything that is not a socket, is left alone. */
+	int fd = tam_sock_listen(path, 0600, 16);
 	if (fd < 0) {
-		snprintf(err, errlen, "socket: %s", strerror(errno));
+		if (errno == EADDRINUSE)
+			snprintf(err, errlen, "server already running on %s", path);
+		else if (errno == EEXIST)
+			snprintf(err, errlen, "%s exists and is not a socket", path);
+		else
+			snprintf(err, errlen, "cannot listen on %s: %s", path,
+				strerror(errno));
 		return -1;
 	}
-	fcntl(fd, F_SETFD, FD_CLOEXEC);
 	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
-
-	mode_t old_mask = umask(0077);
-	int br = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-	int be = errno;
-	umask(old_mask);
-	if (br != 0) {
-		snprintf(err, errlen, "cannot bind %s: %s", path, strerror(be));
-		close(fd);
-		return -1;
-	}
-	if (listen(fd, 16) != 0) {
-		snprintf(err, errlen, "cannot listen on %s: %s", path,
-			strerror(errno));
-		unlink(path);
-		close(fd);
-		return -1;
-	}
 	return fd;
 }
 

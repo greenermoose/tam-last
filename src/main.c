@@ -3,6 +3,9 @@
  * One process hosts 1 window (standalone) or 0..N windows (--server) over a
  * single Wayland display and shared font cache. The loop waits in poll() with
  * no timeout when idle, so idle terminals and an idle server use no CPU. */
+#include <tam_sock.h>
+#include <tam_uni.h>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <langinfo.h>
@@ -1596,6 +1599,12 @@ static void accept_clients(struct tl_server *srv)
 		}
 		fcntl(fd, F_SETFD, FD_CLOEXEC);
 		fcntl(fd, F_SETFL, O_NONBLOCK);
+		/* Only this user's programs may drive the terminal. */
+		uid_t peer;
+		if (tam_sock_peer_uid(fd, &peer) < 0 || peer != geteuid()) {
+			close(fd);
+			continue;
+		}
 		struct tl_pending_client *slot = NULL;
 		for (size_t i = 0; i < TL_SERVER_MAX_PENDING; i++) {
 			if (srv->pending[i].fd < 0) {
@@ -1683,9 +1692,7 @@ static void handle_pending_client(struct tl_server *srv,
 
 static void setup_locale(void)
 {
-	if (setlocale(LC_CTYPE, "") == NULL ||
-	    strcmp(nl_langinfo(CODESET), "UTF-8") != 0)
-		setlocale(LC_CTYPE, "C.UTF-8");
+	(void)tam_locale_init();
 }
 
 static const char *path_basename(const char *p)

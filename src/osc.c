@@ -2,6 +2,8 @@
  * hyperlinks (8), clipboard with policy (52), and dynamic palette/color queries
  * and changes (4, 10, 11, 12, 104, 110, 111, 112). */
 #include "tam-last/osc.h"
+
+#include <tam_b64.h>
 #include "tam-last/term.h"
 
 #include <ctype.h>
@@ -89,134 +91,44 @@ int tl_osc_parse_color(const char *s, size_t len, uint32_t *out)
 	return -1;
 }
 
-static int b64_val(unsigned char c)
-{
-	if (c >= 'A' && c <= 'Z')
-		return c - 'A';
-	if (c >= 'a' && c <= 'z')
-		return c - 'a' + 26;
-	if (c >= '0' && c <= '9')
-		return c - '0' + 52;
-	if (c == '+')
-		return 62;
-	if (c == '/')
-		return 63;
-	return -1;
-}
-
 int tl_base64_decode(const char *src, size_t len, char **out, size_t *out_len)
 {
-	if (out == NULL || out_len == NULL)
+	if (src == NULL || out == NULL)
 		return -1;
-	*out = NULL;
-	*out_len = 0;
-	if (src == NULL && len > 0)
+	/* Applications may wrap or space the payload; tam_b64_decode wants
+	 * only the alphabet and padding. */
+	char *clean = malloc(len + 1);
+	if (clean == NULL)
 		return -1;
-
-	size_t cap = (len / 4) * 3 + 4;
-	char *buf = malloc(cap);
-	if (buf == NULL)
-		return -1;
-
-	uint32_t acc = 0;
-	int count = 0;
-	int pad = 0;
-	size_t w = 0;
-
+	size_t n = 0;
 	for (size_t i = 0; i < len; i++) {
-		unsigned char c = (unsigned char)src[i];
-		if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
-			continue;
-		if (c == '=') {
-			pad++;
-			if (pad > 2) {
-				free(buf);
-				return -1;
-			}
-			continue;
-		}
-		if (pad > 0) {
-			/* Data after padding is malformed. */
-			free(buf);
-			return -1;
-		}
-		int v = b64_val(c);
-		if (v < 0) {
-			free(buf);
-			return -1;
-		}
-		acc = (acc << 6) | (uint32_t)v;
-		count++;
-		if (count == 4) {
-			buf[w++] = (char)((acc >> 16) & 0xff);
-			buf[w++] = (char)((acc >> 8) & 0xff);
-			buf[w++] = (char)(acc & 0xff);
-			acc = 0;
-			count = 0;
-		}
+		char c = src[i];
+		if (c != ' ' && c != '\t' && c != '\r' && c != '\n')
+			clean[n++] = c;
 	}
-
-	if (count == 1) {
-		free(buf);
+	size_t dlen = 0;
+	unsigned char *d = tam_b64_decode(clean, n, &dlen);
+	free(clean);
+	if (d == NULL)
 		return -1;
-	}
-	if (count == 2) {
-		if (pad != 0 && pad != 2) {
-			free(buf);
-			return -1;
-		}
-		buf[w++] = (char)((acc >> 4) & 0xff);
-	} else if (count == 3) {
-		if (pad != 0 && pad != 1) {
-			free(buf);
-			return -1;
-		}
-		buf[w++] = (char)((acc >> 10) & 0xff);
-		buf[w++] = (char)((acc >> 2) & 0xff);
-	} else if (pad != 0) {
-		free(buf);
-		return -1;
-	}
-
-	buf[w] = '\0';
-	*out = buf;
-	*out_len = w;
+	*out = (char *)d;
+	if (out_len != NULL)
+		*out_len = dlen;
 	return 0;
 }
 
 int tl_base64_encode(const void *src, size_t len, char **out, size_t *out_len)
 {
-	static const char tbl[] =
-		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	if (out == NULL || out_len == NULL)
+	if ((src == NULL && len > 0) || out == NULL)
 		return -1;
-	*out = NULL;
-	*out_len = 0;
-	if (src == NULL && len > 0)
+	size_t elen = tam_b64_encoded_len(len);
+	char *e = malloc(elen + 1);
+	if (e == NULL)
 		return -1;
-
-	size_t n = ((len + 2) / 3) * 4;
-	char *buf = malloc(n + 1);
-	if (buf == NULL)
-		return -1;
-
-	const unsigned char *p = src;
-	size_t w = 0;
-	for (size_t i = 0; i < len; i += 3) {
-		uint32_t v = (uint32_t)p[i] << 16;
-		size_t rem = len - i;
-		if (rem > 1)
-			v |= (uint32_t)p[i + 1] << 8;
-		if (rem > 2)
-			v |= (uint32_t)p[i + 2];
-		buf[w++] = tbl[(v >> 18) & 0x3f];
-		buf[w++] = tbl[(v >> 12) & 0x3f];
-		buf[w++] = rem > 1 ? tbl[(v >> 6) & 0x3f] : '=';
-		buf[w++] = rem > 2 ? tbl[v & 0x3f] : '=';
-	}
-	buf[w] = '\0';
-	*out = buf;
-	*out_len = w;
+	tam_b64_encode(src, len, e);
+	*out = e;
+	if (out_len != NULL)
+		*out_len = elen;
 	return 0;
 }
 

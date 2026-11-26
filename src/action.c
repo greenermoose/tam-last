@@ -3,6 +3,8 @@
 #include "tam-last/action.h"
 #include "tam-last/url.h"
 
+#include <tam.h>
+
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -128,30 +130,10 @@ int tl_action_open_url(const char *uri)
 {
 	if (!tl_url_is_safe(uri))
 		return -1;
-	/* Double-fork so the launched browser/viewer is reparented to init
-	 * and cannot linger as a zombie or inherit terminal lifetime. */
-	pid_t pid = fork();
-	if (pid < 0)
-		return -1;
-	if (pid == 0) {
-		(void)setsid();
-		pid_t grand = fork();
-		if (grand == 0) {
-			signal(SIGPIPE, SIG_DFL);
-			signal(SIGCHLD, SIG_DFL);
-			close_inherited_fds();
-			char *argv[3] = {
-				(char *)"xdg-open", (char *)uri, NULL
-			};
-			execvp("xdg-open", argv);
-			_exit(127);
-		}
-		_exit(0);
-	}
-	int st;
-	while (waitpid(pid, &st, 0) < 0 && errno == EINTR)
-		;
-	return 0;
+	/* Detached, in its own session, with none of the terminal's
+	 * descriptors; a missing xdg-open is now an error, not silence. */
+	const char *argv[] = { "xdg-open", uri, NULL };
+	return tam_spawn_detached(argv);
 }
 
 int tl_action_next_timeout_ms(const struct tl_actions *act)

@@ -1,0 +1,42 @@
+W18 ONTO LIBTAM'S SHARED CODE (TAM-LAST 0.2.5)
+
+Date: 2026-11-26
+AI harness: Claude Code 2.1.332
+AI model: claude-opus-5-5
+Continues: W17
+
+
+GUIDANCE
+
+  Fred: "Move each program onto the shared code."
+
+
+DONE
+
+  - Clipboard and primary selection: write_selection_fd writes what the
+    pipe takes without blocking; a slow reader gets the rest from a
+    double-forked helper that keeps only that descriptor and stops after
+    30 seconds. Before, a client that did not read froze the terminal
+    inside Wayland event dispatch.
+  - tl_base64_decode/encode are thin wrappers over tam_b64 (whitespace is
+    still ignored on decode).
+  - tl_action_open_url uses tam_spawn_detached, after tl_url_is_safe, so
+    a missing xdg-open is reported instead of ignored.
+  - tl_ipc_listen uses tam_sock_listen (stale socket replaced, live one or
+    non-socket refused, same messages); accepted clients must have our
+    uid. setup_locale is tam_locale_init.
+  - Compile-time floor libtam 0.11.0 (ipc.c).
+  - make test (unit suites and headless tam-pane) and make sanitize pass.
+
+
+FAILED
+
+  - Nothing.
+
+
+HANDOFF
+
+  - Kept local: the UTF-8 encoders and decoders (search positions and
+    widths depend on mapping a bad sequence to one U+FFFD), the timespec
+    clocks, notify-send's tracked child, and the IPC server's write
+    timeout.

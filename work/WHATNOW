@@ -8,6 +8,11 @@ Updated: 2026-11-25, with W17
 
 STATE
 
+  Version 0.2.5 on branch dev (W18): onto libtam's shared code. Sending a
+  selection no longer blocks the terminal on a slow reader; base64, the
+  URL opener, the IPC listener (now with a peer-uid check) and locale
+  setup use libtam. make test and make sanitize pass.
+
   Version 0.2.4 on branch dev (W17):
   - Honoured wl_keyboard.modifiers depressed bits in include/tam-last/keys.h,
     src/keys/keymap.c, and src/main.c so synthetic chords (Hyprland

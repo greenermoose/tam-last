@@ -2,6 +2,9 @@
  * registry, seat focus routing, clipboard/primary, IME, and frame pacing. */
 #include "tam-last/window.h"
 
+#include <signal.h>
+#include <stdbool.h>
+#include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -302,9 +305,17 @@ static void pick_mime(char dst[64], const char *mime)
 		snprintf(dst, 64, "%s", mime);
 }
 
+/* Send a selection to the program that asked for it, never blocking the
+ * terminal: write what the pipe takes now, and leave the rest to a
+ * short-lived helper (double-forked, so init reaps it) that holds only this
+ * descriptor and gives up after 30 seconds. */
 static void write_selection_fd(int fd, const char *data, size_t len)
 {
+	int fl = fcntl(fd, F_GETFL);
+	if (fl >= 0)
+		(void)fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 	size_t off = 0;
+	bool would_block = false;
 	while (off < len) {
 		ssize_t n = write(fd, data + off, len - off);
 		if (n > 0) {
@@ -313,7 +324,41 @@ static void write_selection_fd(int fd, const char *data, size_t len)
 		}
 		if (n < 0 && errno == EINTR)
 			continue;
+		would_block = n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
 		break;
+	}
+	if (would_block) {
+		pid_t pid = fork();
+		if (pid == 0) {
+			if (fork() != 0)
+				_exit(0);
+			long maxfd = sysconf(_SC_OPEN_MAX);
+			if (maxfd < 0 || maxfd > 65536)
+				maxfd = 65536;
+			for (int i = 3; i < (int)maxfd; i++)
+				if (i != fd)
+					(void)close(i);
+			sigset_t none;
+			sigemptyset(&none);
+			(void)sigprocmask(SIG_SETMASK, &none, NULL);
+			signal(SIGALRM, SIG_DFL);
+			alarm(30);
+			if (fl >= 0)
+				(void)fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
+			while (off < len) {
+				ssize_t n = write(fd, data + off, len - off);
+				if (n > 0)
+					off += (size_t)n;
+				else if (n < 0 && errno == EINTR)
+					continue;
+				else
+					break;
+			}
+			_exit(0);
+		}
+		if (pid > 0)
+			while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+				;
 	}
 	close(fd);
 }
