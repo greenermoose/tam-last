@@ -27,7 +27,7 @@ NEEDED.
 
 ## Build-time only
 
-- **make and a C11 compiler.** Plain Make; no other build system.
+- **make and a C17 compiler.** Plain Make; no other build system.
 - **ASan and UBSan** from the compiler, for `make sanitize`.
 - **A POSIX sh** runs `tests/headless.sh`, and **tam-pane** (optional)
   is the compositor it runs under.
