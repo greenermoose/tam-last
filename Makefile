@@ -26,7 +26,7 @@ B ?= build
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 
 CFLAGS ?= -O2 -g
-override CFLAGS += -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wvla \
+override CFLAGS += -std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wvla \
 	-D_XOPEN_SOURCE=700 -DTL_VERSION='"$(VERSION)"' \
 	-Iinclude -I$(LIBTAM_PREFIX)/include \
 	-ffile-prefix-map=$(CURDIR)=. -MMD -MP

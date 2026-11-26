@@ -4,7 +4,7 @@
  * Usage:
  *   gen-layouts -o OUT.c -c layouts/compose layouts/us.layout [...]
  *
- * Zero dependencies beyond C11 libc. Validates evdev names, UTF-8 tokens,
+ * Zero dependencies beyond C17 libc. Validates evdev names, UTF-8 tokens,
  * and compose prefix conflicts at build time. */
 #include <ctype.h>
 #include <stdbool.h>

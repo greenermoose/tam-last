@@ -75,7 +75,7 @@ HOW IT IS BUILT
 
 BUILDING
 
-  Needs: a C11 compiler, make, and libtam installed under LIBTAM_PREFIX
+  Needs: a C17 compiler, make, and libtam installed under LIBTAM_PREFIX
   (default $HOME/.local). Nothing else.
 
     make              build build/tam-last
