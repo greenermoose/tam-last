@@ -177,6 +177,14 @@ int main(void)
 	tl_kbd_key(&k, TL_KEY_LEFTMETA, true);
 	tl_kbd_modifiers(&k, TL_XKB_SHIFT, 0);
 	CHECK(tl_kbd_mods(&k) == TL_MOD_SHIFT);
+	tl_kbd_set_layout(&k, tl_layout_find("us-intl"));
+	tl_kbd_key(&k, TL_KEY_RIGHTALT, true);
+	tl_kbd_modifiers(&k, TL_XKB_MOD1 | TL_XKB_MOD4, 0);
+	CHECK(tl_kbd_mods(&k) == (TL_MOD_ALTGR | TL_MOD_META));
+	tl_kbd_modifiers(&k, TL_XKB_CTRL | TL_XKB_SHIFT, 0);
+	CHECK(tl_kbd_mods(&k) == (TL_MOD_CTRL | TL_MOD_SHIFT));
+	tl_kbd_modifiers(&k, TL_XKB_MOD5 | TL_XKB_MOD4, 0);
+	CHECK(tl_kbd_mods(&k) == (TL_MOD_ALTGR | TL_MOD_META));
 	tl_kbd_modifiers(&k, 0, TL_XKB_LOCK);
 	CHECK(tl_kbd_mods(&k) == 0 && k.caps && !k.num);
 	tl_kbd_leave(&k);

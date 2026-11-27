@@ -3,10 +3,14 @@ WHATNOW
 What tam-last is doing now and what comes next. Read this first; revise
 it at the end of every session (work/README-work).
 
-Updated: 2026-11-25, with W17
+Updated: 2026-11-26, with W19
 
 
 STATE
+
+  A synthetic paste chord can override a held Right Alt on AltGr layouts
+  (W19). Native terminal paste and application Ctrl+V were checked in a
+  private tam-pane session.
 
   Version 0.2.5 on branch dev (W18): onto libtam's shared code. Sending a
   selection no longer blocks the terminal on a slow reader; base64, the

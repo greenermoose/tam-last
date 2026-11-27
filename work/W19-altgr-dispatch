@@ -1,0 +1,28 @@
+W19 ALTGR DURING DISPATCHED PASTE
+
+Date: 2026-11-26
+AI harness: Codex CLI 0.172.0
+AI model: gpt-6.2-sol
+Commits: Same commit as this record.
+
+GUIDANCE
+
+  Fred: "3) Macros to work in every program running in tam-last." (excerpt)
+  Fred: "Implement the plan."
+
+DONE
+
+  - Treat a held Right Alt as AltGr when the compositor reports Alt.
+    A synthetic Ctrl+Shift+V mask overrides the held key for paste.
+  - The keyboard suite passed 273 checks. Macro text reached Bash,
+    tam-clam, Vim, a tmux-hosted shell and Codex under private tam-pane.
+    Vim used Ctrl+V for visual block mode. Codex 0.174.0-alpha.7
+    accepted both text and clipboard images with its own Ctrl+V handler.
+
+FAILED
+
+  - Nothing.
+
+HANDOFF
+
+  - Include the fix in the next selected Tamlinux candidate for live Test.

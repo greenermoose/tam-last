@@ -131,8 +131,11 @@ unsigned tl_kbd_mods(const struct tl_kbd *k)
 			m |= TL_MOD_CTRL;
 		if (k->depressed & TL_XKB_MOD4)
 			m |= TL_MOD_META;
+		/* Right Alt can stand in for AltGr when the compositor reports Alt.
+		 * A held key alone must not override a synthetic modifier mask. */
 		if (has_altgr &&
-		    ((k->depressed & TL_XKB_MOD5) || held(k, TL_KEY_RIGHTALT))) {
+		    ((k->depressed & TL_XKB_MOD5) ||
+		     ((k->depressed & TL_XKB_MOD1) && held(k, TL_KEY_RIGHTALT)))) {
 			m |= TL_MOD_ALTGR;
 			if ((k->depressed & TL_XKB_MOD1) &&
 			    (!held(k, TL_KEY_RIGHTALT) || held(k, TL_KEY_LEFTALT)))
