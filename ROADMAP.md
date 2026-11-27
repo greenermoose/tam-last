@@ -1,95 +1,83 @@
 # tam-last roadmap
 
-Each milestone has a version number. A phase (see `plans/`) covers a range
-of versions. Versions follow semantic versioning: during 0.x, the minor
-number marks a phase's big step and the patch number marks each
-milestone inside it.
+`tam-last` is Tamlinux's Wayland terminal emulator, written in C17 with
+only libc and `libtam`.
 
-**Current version:** 0.0.2 (the skeleton with sharp text on scaled
-outputs, B1; 2026-11-17). Fred found its text as crisp as foot's, so
-FreeType stays out. Development continues on branch `dev`.
+- **Current version:** `0.2.5` (branch `dev`)
+- **Progress:** 3 of 5 phases done (P1–P3 done; P4 next)
+- **Versioning:** Semantic versioning; during 0.x, minor marks a phase and
+  patch marks milestones or fixes within it.
+
+## Phase summary
+
+| Phase | Versions | Goal | Plan | Status |
+| --- | --- | --- | --- | --- |
+| **P1** | 0.0.x | Foundation: Wayland client, TrueType rasterizer, VT emulation, scrollback, looks | [P1-foundation.md](plans/P1-foundation.md) | Done (2026-11-22) |
+| **P2** | 0.1.x | Key path: kitty keyboard protocol, `--keys` trace, compiled layouts, IME | [P2-key-path.md](plans/P2-key-path.md) | Done |
+| **P3** | 0.2.x | Daily parity with foot: OSCs, sync output, search, server mode, `libtam` adoption | [P3-daily-parity.md](plans/P3-daily-parity.md) | Done (2026-11-26) |
+| **P4** | 0.3.x | Dogfooding in place of foot with daily-use fixes | [P4-dogfood.md](plans/P4-dogfood.md) | Planned |
+| **P5** | 1.0.0 | Replace foot as Tamlinux's terminal (only on Fred's word) | [P5-tamlinux-terminal.md](plans/P5-tamlinux-terminal.md) | Planned |
 
 ## Decided
 
 Fred decided these on 2026-11-17:
 
-- tam-last is our own Wayland terminal, in C, with no dependency other
-  than the standard C libraries and libtam. The point is full control over
-  how key presses get from evdev to our TUI apps, and the fun of exploring
-  that path.
-- foot is the primary reference; other terminals are read for ideas.
-- Keys are mapped from evdev codes by our own compiled-in keymap. The
-  compositor's XKB keymap is not read.
-- Text is drawn from TrueType fonts by our own rasterizer from the start.
-  FreeType is the fallback: it comes in only if Fred, comparing tam-last
-  and foot side by side, finds our text worse. He compared 0.0.2 the same
-  day and found it as crisp as foot's.
-- The repository copies the structure of tam-pane and tam-clam.
+- `tam-last` is our own Wayland terminal in C, depending only on libc and
+  `libtam`, giving full control over the key path from evdev to TUI apps.
+- `foot` is the primary reference; other terminals are read for ideas.
+- Keys are mapped from evdev codes by our own compiled-in keymap rather
+  than reading the compositor's XKB keymap.
+- Text is drawn from TrueType fonts by our own rasterizer; Fred compared
+  0.0.2 side by side with `foot` and found it as crisp, so FreeType stays
+  out.
 
-The versions below are a proposal. Fred has not yet set when tam-last
-enters a Tamlinux release.
+## Phases and milestones
 
-## Milestones
+### Phase P1: Foundation (0.0.x) — [P1-foundation.md](plans/P1-foundation.md)
 
-### Phase P1: foundation (0.0.x), `plans/P1-foundation.md`
+| Version | Milestone | Status |
+| --- | --- | --- |
+| **0.0.1** | Skeleton: Wayland client, TrueType rasterizer, US keymap, pty shell, cursor/color/wide-char emulation | Done (2026-11-17) |
+| **0.0.2** | Sharp text on scaled outputs via fractional-scale-v1 and viewporter (B1) | Done (2026-11-17) |
+| **0.0.3** | Full-screen programs: alt screen, scroll regions, DEC line drawing, combining chars, cursor styles, damage tracking | Done (2026-11-21) |
+| **0.0.4** | Scrollback, pointer and wheel, selection, clipboard/primary selection, bracketed paste, mouse reporting | Done (2026-11-21) |
+| **0.0.5** | HiDPI, bold/italic faces, fallback font, drawn box/block chars, and `tam_ini` configuration | Done (2026-11-22) |
 
-- **0.0.1** The skeleton: our own Wayland client, TrueType rasterizer,
-  US keymap and legacy key encoding; a shell runs on a pty; cursor
-  movement, erasing, insert and delete, colors and attributes, wide
-  characters.
-- **0.0.2** A fix to 0.0.1: sharp text on scaled outputs, through
-  fractional-scale-v1 and viewporter (B1).
-- **0.0.3** Full-screen programs: the alternate screen, scroll regions,
-  origin and insert modes, DEC line-drawing characters, combining
-  characters, cursor styles, and damage tracking so only changed cells
-  are drawn. Enough for vim, htop, less, yazi and our tam TUIs.
-- **0.0.4** Scrollback, the pointer and wheel, selection, the clipboard
-  and primary selection, bracketed paste, and mouse reporting.
-- **0.0.5** Integer HiDPI for compositors without fractional scaling
-  (which 0.0.1 already has), bold
-  and italic faces, a fallback font for missing characters, box-drawing
-  and block characters drawn by code, and colors and options from a
-  configuration file (`tam_ini`), starting from the Tamlinux theme.
+### Phase P2: The key path (0.1.x) — [P2-key-path.md](plans/P2-key-path.md)
 
-### Phase P2: the key path (0.1.x), `plans/P2-key-path.md`
+| Version | Milestone | Status |
+| --- | --- | --- |
+| **0.1.0** | Kitty keyboard protocol: progressive flags, CSI u, release/repeat events, alternate keys, flags stack | Done |
+| **0.1.1** | `tam-last --keys` trace mode showing every hop of a key press | Done |
+| **0.1.2** | Compiled keyboard layouts with AltGr, dead keys, and compose | Done |
+| **0.1.3** | Input methods via `text-input-v3` | Done |
 
-- **0.1.0** The kitty keyboard protocol: progressive enhancement flags,
-  CSI u, release and repeat events, alternate keys, the flags stack.
-- **0.1.1** `tam-last --keys`: a mode that shows each hop of every key
-  press (evdev code, held modifiers, character, bytes written).
-- **0.1.2** More layouts, compiled at build time from a compact source
-  format, with AltGr, dead keys and compose.
-- **0.1.3** Input methods (text-input-v3), for characters no keyboard
-  has.
+### Phase P3: Daily parity with foot (0.2.x) — [P3-daily-parity.md](plans/P3-daily-parity.md)
 
-### Phase P3: daily parity with foot (0.2.x), `plans/P3-daily-parity.md`
+| Version | Milestone | Status |
+| --- | --- | --- |
+| **0.2.0** | Window titles, OSC 7 (cwd), OSC 8 (links), OSC 52 (clipboard policy), color queries/changes | Done |
+| **0.2.1** | Synchronized output (DEC 2026), DA2, XTVERSION, DECRQM, and terminfo entry | Done |
+| **0.2.2** | Scrollback search, URL mode, and OSC 777/99 notifications | Done |
+| **0.2.3** | Server mode with shared font cache and client IPC | Done |
+| **0.2.4** | Honor depressed modifiers and align clipboard shortcuts | Done |
+| **0.2.5** | Non-blocking selection reader, `libtam` shared-code adoption, and synthetic AltGr modifier masks | Done (2026-11-26) |
 
-- **0.2.0** Window titles, OSC 7 (working directory), OSC 8 (links),
-  OSC 52 (clipboard, with a policy), color queries and changes.
-- **0.2.1** Synchronized output (DEC 2026), device and version queries
-  (DA2, XTVERSION), and our own terminfo entry.
-- **0.2.2** Search in scrollback, URL mode, notifications.
-- **0.2.3** A server mode, so new windows start instantly and share the
-  font cache, as `foot --server` does.
+### Phase P4: Dogfood (0.3.x) — [P4-dogfood.md](plans/P4-dogfood.md)
 
-### Phase P4: dogfood (0.3.x), `plans/P4-dogfood.md`
+| Version | Milestone | Status |
+| --- | --- | --- |
+| **0.3.0** | Packaged for Tamlinux; Fred uses `tam-last` in place of `foot` (with `foot` kept as fallback) | Planned |
+| **0.3.x** | Fixes from daily use, recorded in `bugs/` | Planned |
 
-- **0.3.0** Packaged in `tamlinux-packages`. Fred uses tam-last in place
-  of foot, with foot kept installed as the fallback.
-- **0.3.x** Fixes from daily use, recorded in `bugs/`.
+### Phase P5: The Tamlinux terminal (1.0.0) — [P5-tamlinux-terminal.md](plans/P5-tamlinux-terminal.md)
 
-### Phase P5: the Tamlinux terminal (1.0.0), `plans/P5-tamlinux-terminal.md`
-
-- **1.0.0** tam-last replaces foot as Tamlinux's terminal. This happens
-  only on Fred's Test, Run and Release words.
+| Version | Milestone | Status |
+| --- | --- | --- |
+| **1.0.0** | `tam-last` replaces `foot` as Tamlinux's terminal (only on Fred's word) | Planned |
 
 ## How a milestone is done
 
 A milestone is done when its acceptance checks in the phase plan pass and
-Fred has tried the build.
-
-Every change to the code bumps `VERSION` in the same commit, so each
-build Fred runs says which one it is (`tam-last --version`, checked by
-`make test`). A milestone takes its version when it lands; a fix between
-milestones takes the next patch number, and the milestones after it
-move up one, as 0.0.2 (B1) did.
+Fred has tried the build. When a milestone lands, bump `VERSION`, update
+the phase plan's status, and update this roadmap in the same change.
